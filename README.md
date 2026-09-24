@@ -20,6 +20,7 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 
 - Insumos con unidades base en gramos, mililitros o unidades.
 - Compras y costo promedio ponderado.
+- Ajustes manuales de stock con motivo e historial; aportes de insumos del hogar al registrar producciones sin stock suficiente.
 - Productos, recetas, rendimiento y precio de venta.
 - Edición segura de insumos, productos y recetas.
 - Registro de producciones por tanda con validación y descuento de materias primas.

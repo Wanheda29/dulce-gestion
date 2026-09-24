@@ -1,8 +1,9 @@
 const STORAGE_KEY = "dulce-gestion-v1";
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export const emptyState = {
   ingredients: [],
+  stockAdjustments: [],
   purchases: [],
   products: [],
   productions: [],
@@ -88,6 +89,7 @@ export function backupSummary(state) {
   const data = normalizeState(state);
   return {
     ingredients: data.ingredients.length,
+    stockAdjustments: data.stockAdjustments.length,
     purchases: data.purchases.length,
     products: data.products.length,
     productions: data.productions.length,

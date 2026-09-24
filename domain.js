@@ -29,6 +29,59 @@ export function updateWeightedAverage(currentStock, currentAverage, addedQuantit
   };
 }
 
+export function countedStock(ingredient, actualStock, addedValue = 0) {
+  const previousStock = Number(ingredient.stock);
+  const newStock = Number(actualStock);
+  const value = Number(addedValue);
+  if (![previousStock, newStock, value].every(Number.isFinite) || previousStock < 0 || newStock < 0 || value < 0) {
+    throw new Error("La existencia y el valor del aporte deben ser números no negativos.");
+  }
+  const delta = newStock - previousStock;
+  const updated = delta > 0
+    ? updateWeightedAverage(previousStock, ingredient.averageCost, delta, value)
+    : { stock: newStock, averageCost: Number(ingredient.averageCost || 0) };
+  return { ...updated, previousStock, delta, addedValue: delta > 0 ? value : 0 };
+}
+
+export function productionWithHomeSupply(product, ingredients, batches = 1, missingValues = {}) {
+  const workingIngredients = ingredients.map((ingredient) => ({ ...ingredient }));
+  const initialPlan = productionPlan(product, workingIngredients, batches);
+  const adjustments = initialPlan.requirements.filter((line) => !line.enough).map((line) => {
+    const ingredient = workingIngredients.find((item) => item.id === line.ingredientId);
+    if (!ingredient) throw new Error("La receta contiene un insumo que ya no existe.");
+    const previousAverageCost = Number(ingredient.averageCost || 0);
+    const missing = line.required - line.available;
+    const suppliedValue = missingValues[line.ingredientId];
+    const addedValue = suppliedValue === undefined
+      ? missing * Number(ingredient.averageCost || 0)
+      : Number(suppliedValue);
+    const counted = countedStock(ingredient, line.required, addedValue);
+    ingredient.stock = counted.stock;
+    ingredient.averageCost = counted.averageCost;
+    return { ingredientId: ingredient.id, previousStock: counted.previousStock, previousAverageCost, newStock: counted.stock, delta: missing, addedValue, unitCost: addedValue / missing, costUnestimated: addedValue === 0 };
+  });
+  const plan = productionPlan(product, workingIngredients, batches);
+  return { ingredients: workingIngredients, adjustments, plan, costUnestimated: adjustments.some((item) => item.costUnestimated) };
+}
+
+export function reverseProductionStock(ingredients, requirements, homeAdjustments = []) {
+  const restored = ingredients.map((ingredient) => ({ ...ingredient }));
+  for (const line of requirements) {
+    const ingredient = restored.find((item) => item.id === line.ingredientId);
+    if (ingredient) ingredient.stock += Number(line.required);
+  }
+  for (const entry of homeAdjustments) {
+    const ingredient = restored.find((item) => item.id === entry.ingredientId);
+    if (!ingredient) continue;
+    const remainingStock = ingredient.stock - Number(entry.delta);
+    const remainingValue = ingredient.stock * Number(ingredient.averageCost || 0) - Number(entry.addedValue || 0);
+    if (remainingStock < 0) throw new Error("No se puede revertir el aporte: el stock resultaría negativo.");
+    ingredient.stock = remainingStock;
+    ingredient.averageCost = remainingStock > 0 ? Math.max(0, remainingValue / remainingStock) : Number(entry.previousAverageCost || 0);
+  }
+  return restored;
+}
+
 export function recipeCost(product, ingredients) {
   const ingredientCost = (product.recipe ?? []).reduce((total, line) => {
     const ingredient = ingredients.find((item) => item.id === line.ingredientId);
@@ -88,12 +141,15 @@ export function saleFromOrder(order, product, ingredients, date, id) {
 export function productionPlan(product, ingredients, batches = 1) {
   const batchCount = Number(batches);
   if (!product || batchCount <= 0) throw new Error("La cantidad de tandas debe ser positiva.");
-  const requirements = (product.recipe ?? []).map((line) => {
-    const ingredient = ingredients.find((item) => item.id === line.ingredientId);
-    const required = Number(line.quantity) * batchCount;
+  const totals = new Map();
+  for (const line of product.recipe ?? []) {
+    totals.set(line.ingredientId, (totals.get(line.ingredientId) || 0) + Number(line.quantity) * batchCount);
+  }
+  const requirements = [...totals].map(([ingredientId, required]) => {
+    const ingredient = ingredients.find((item) => item.id === ingredientId);
     const available = Number(ingredient?.stock || 0);
     return {
-      ingredientId: line.ingredientId,
+      ingredientId,
       name: ingredient?.name || "Insumo eliminado",
       unit: ingredient?.baseUnit || "",
       required,

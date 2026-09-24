@@ -1,4 +1,4 @@
-import { marginPercent, monthlySummary, productionPlan, recipeCost, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
+import { countedStock, marginPercent, monthlySummary, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
@@ -10,6 +10,7 @@ const titles = { inicio: "Resumen", insumos: "Insumos", compras: "Compras", prod
 const optionalLabels = { packaging: "Envases", labor: "Mano de obra", gas: "Gas", electricity: "Electricidad", delivery: "Reparto", other: "Otros" };
 const statusLabels = { pendiente: "Pendiente", confirmado: "Confirmado", produccion: "En producción", listo: "Listo", entregado: "Entregado", cancelado: "Cancelado" };
 const subscriptionLabels = { active: "Activa", grace: "Período de gracia", read_only: "Solo lectura", suspended: "Suspendida" };
+const adjustmentLabels = { family: "Uso familiar", home: "Insumos de casa", correction: "Corrección de inventario", production: "Aporte de casa para producción" };
 let cloudSession = null;
 let cloudAccount = null;
 let cloudLoading = isCloudConfigured();
@@ -197,11 +198,43 @@ function renderDashboard() {
 }
 
 function renderIngredients() {
-  app.innerHTML = pageHeading("Insumos", "Definí cada materia prima y su unidad base.", `<button class="primary" id="new-ingredient">Nuevo insumo</button>`) + `
-    <article class="card">${state.ingredients.length ? `<div class="table-wrap"><table><thead><tr><th>Insumo</th><th>Existencia</th><th>Costo por unidad</th><th>Valor en stock</th><th></th></tr></thead><tbody>${state.ingredients.map((item) => `<tr><td><strong>${h(item.name)}</strong></td><td>${decimal.format(item.stock)} ${item.baseUnit}</td><td>${money.format(item.averageCost)} / ${item.baseUnit}</td><td>${money.format(item.stock * item.averageCost)}</td><td class="actions"><button class="ghost compact-button" data-edit-ingredient="${item.id}">Editar</button></td></tr>`).join("")}</tbody></table></div>` : empty("Creá harina, azúcar, huevos o cualquier materia prima.", `<button class="primary" id="empty-ingredient">Crear primer insumo</button>`)}</article>`;
+  const adjustments = [...state.stockAdjustments].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  app.innerHTML = pageHeading("Insumos", "Registrá compras y corregí la existencia cuando el stock real cambie.", `<button class="primary" id="new-ingredient">Nuevo insumo</button>`) + `
+    <article class="card">${state.ingredients.length ? `<div class="table-wrap"><table><thead><tr><th>Insumo</th><th>Existencia</th><th>Costo por unidad</th><th>Valor en stock</th><th></th></tr></thead><tbody>${state.ingredients.map((item) => `<tr><td><strong>${h(item.name)}</strong></td><td>${decimal.format(item.stock)} ${item.baseUnit}</td><td>${money.format(item.averageCost)} / ${item.baseUnit}</td><td>${money.format(item.stock * item.averageCost)}</td><td class="actions"><div class="row-actions"><button class="ghost compact-button" data-adjust-ingredient="${item.id}">Ajustar stock</button><button class="ghost compact-button" data-edit-ingredient="${item.id}">Editar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Creá harina, azúcar, huevos o cualquier materia prima.", `<button class="primary" id="empty-ingredient">Crear primer insumo</button>`)}</article>
+    <article class="card stock-history"><h3>Historial de ajustes</h3><p class="muted">Los cambios manuales y los aportes desde casa quedan registrados aquí. Las compras se consultan en Compras.</p>${adjustments.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Insumo</th><th>Cambio</th><th>Existencia</th><th>Motivo</th><th>Valor agregado</th><th>Registrado por</th></tr></thead><tbody>${adjustments.map((entry) => `<tr><td>${h(entry.date || entry.createdAt?.slice(0, 10) || "")}</td><td><strong>${h(ingredientById(entry.ingredientId)?.name || entry.ingredientName || "Insumo eliminado")}</strong></td><td>${entry.delta > 0 ? "+" : ""}${decimal.format(entry.delta)} ${h(entry.unit || "")}</td><td>${decimal.format(entry.previousStock)} → ${decimal.format(entry.newStock)} ${h(entry.unit || "")}</td><td>${h(adjustmentLabels[entry.reason] || entry.reason)}${entry.note ? `<small class="muted history-note">${h(entry.note)}</small>` : ""}${entry.voidedAt ? `<small class="muted history-note">Anulado con la producción</small>` : ""}</td><td>${entry.delta > 0 ? money.format(entry.addedValue || 0) : "—"}${entry.costUnestimated ? `<small class="muted history-note">Sin estimar</small>` : ""}</td><td>${h(entry.actorEmail || "—")}</td></tr>`).join("")}</tbody></table></div>` : empty("Todavía no hay ajustes de stock.")}</article>`;
   app.querySelector("#new-ingredient")?.addEventListener("click", () => openIngredientDialog());
   app.querySelector("#empty-ingredient")?.addEventListener("click", () => openIngredientDialog());
   app.querySelectorAll("[data-edit-ingredient]").forEach((button) => button.addEventListener("click", () => openIngredientDialog(ingredientById(button.dataset.editIngredient))));
+  app.querySelectorAll("[data-adjust-ingredient]").forEach((button) => button.addEventListener("click", () => openStockAdjustmentDialog(ingredientById(button.dataset.adjustIngredient))));
+}
+
+function openStockAdjustmentDialog(ingredient) {
+  const modal = dialog(`<h2>Ajustar stock</h2><p>${h(ingredient.name)}: el sistema registra ${decimal.format(ingredient.stock)} ${h(ingredient.baseUnit)}. Indicá cuánto hay realmente; el cambio quedará en el historial.</p><form id="stock-adjustment-form"><div class="form-grid"><div class="field"><label>Existencia real (${h(ingredient.baseUnit)})</label><input name="actualStock" type="number" min="0" step="0.001" value="${ingredient.stock}" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><label>Motivo</label><select name="reason"><option value="correction">Corrección de inventario</option><option value="family">Uso familiar</option><option value="home">Insumos de casa</option></select></div><div class="field full"><label>Nota (opcional)</label><input name="note" maxlength="200" placeholder="Ej. Usaron harina para cocinar en casa"></div><div class="field full" id="added-value-field" hidden><label>Valor estimado del aumento ($)</label><input name="addedValue" type="number" min="0" step="0.01"><small class="muted">No se registra como compra. Si no conocés el valor, podés dejarlo en cero y figurará como sin estimar.</small></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar ajuste</button></div></form>`);
+  const form = modal.querySelector("form");
+  const valueField = form.querySelector("#added-value-field");
+  let valueEdited = false;
+  let reasonEdited = false;
+  form.elements.addedValue.addEventListener("input", () => { valueEdited = true; });
+  form.elements.reason.addEventListener("change", () => { reasonEdited = true; });
+  form.elements.actualStock.addEventListener("input", () => {
+    const delta = Number(form.elements.actualStock.value) - Number(ingredient.stock);
+    valueField.hidden = !(delta > 0);
+    if (delta > 0 && !valueEdited) form.elements.addedValue.value = (delta * Number(ingredient.averageCost || 0)).toFixed(2);
+    if (!reasonEdited) form.elements.reason.value = delta > 0 ? "home" : delta < 0 ? "family" : "correction";
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    try {
+      const actualStock = Number(form.elements.actualStock.value);
+      const counted = countedStock(ingredient, actualStock, Number(form.elements.addedValue.value || 0));
+      if (!counted.delta) return toast("La existencia no cambió");
+      state.stockAdjustments.push({ id: uid("adj"), ingredientId: ingredient.id, ingredientName: ingredient.name, unit: ingredient.baseUnit, previousStock: counted.previousStock, newStock: counted.stock, delta: counted.delta, addedValue: counted.addedValue, costUnestimated: counted.delta > 0 && counted.addedValue === 0, reason: form.elements.reason.value, note: form.elements.note.value.trim(), date: form.elements.date.value, createdAt: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null, sourceProductionId: null });
+      ingredient.stock = counted.stock;
+      ingredient.averageCost = counted.averageCost;
+      modal.close();
+      persist("Stock ajustado e historial actualizado");
+    } catch (error) { toast(error.message); }
+  });
 }
 
 function openIngredientDialog(existing = null) {
@@ -294,31 +327,40 @@ function renderProduction() {
   const productions = [...state.productions].sort((a, b) => b.date.localeCompare(a.date));
   app.innerHTML = pageHeading("Producción", "Registrá cada elaboración y descontá sus insumos del inventario.", `<button class="primary" id="new-production" ${state.products.length ? "" : "disabled"}>Registrar producción</button>`) + `
     ${!state.products.length ? `<p class="warning">Necesitás un producto con receta antes de registrar una producción.</p>` : ""}
-    <article class="card">${productions.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tandas</th><th>Unidades obtenidas</th><th>Costo total</th><th>Estado</th><th></th></tr></thead><tbody>${productions.map((production) => `<tr class="${production.voidedAt ? "voided-row" : ""}"><td>${production.date}</td><td><strong>${h(productById(production.productId)?.name || "Producto eliminado")}</strong></td><td>${decimal.format(production.batches)}</td><td>${decimal.format(production.producedQuantity)}</td><td>${money.format(production.totalCostSnapshot)}</td><td>${production.voidedAt ? `<span class="status status-cancelado">Anulada</span>` : `<span class="status status-entregado">Registrada</span>`}</td><td class="actions">${production.voidedAt ? "" : `<button class="danger compact-button" data-void-production="${production.id}">Anular</button>`}</td></tr>`).join("")}</tbody></table></div>` : empty("Las elaboraciones registradas aparecerán aquí.")}</article>`;
+    <article class="card">${productions.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tandas</th><th>Unidades obtenidas</th><th>Costo total</th><th>Estado</th><th></th></tr></thead><tbody>${productions.map((production) => `<tr class="${production.voidedAt ? "voided-row" : ""}"><td>${production.date}</td><td><strong>${h(productById(production.productId)?.name || "Producto eliminado")}</strong></td><td>${decimal.format(production.batches)}</td><td>${decimal.format(production.producedQuantity)}</td><td>${money.format(production.totalCostSnapshot)}${production.costUnestimated ? `<small class="history-note muted">Costo parcial: aporte sin estimar</small>` : ""}</td><td>${production.voidedAt ? `<span class="status status-cancelado">Anulada</span>` : `<span class="status status-entregado">Registrada</span>`}</td><td class="actions">${production.voidedAt ? "" : `<button class="danger compact-button" data-void-production="${production.id}">Anular</button>`}</td></tr>`).join("")}</tbody></table></div>` : empty("Las elaboraciones registradas aparecerán aquí.")}</article>`;
   app.querySelector("#new-production")?.addEventListener("click", openProductionDialog);
-  app.querySelectorAll("[data-void-production]").forEach((button) => button.addEventListener("click", () => confirmAction("Anular producción", "Se devolverán al inventario exactamente los insumos descontados. El registro permanecerá visible como anulado.", "Anular y devolver insumos", () => voidProduction(button.dataset.voidProduction))));
+  app.querySelectorAll("[data-void-production]").forEach((button) => button.addEventListener("click", () => confirmAction("Anular producción", "Se devolverán los insumos descontados y se revertirán los aportes automáticos de casa. El registro permanecerá visible como anulado.", "Anular producción", () => voidProduction(button.dataset.voidProduction))));
 }
 
 function voidProduction(productionId) {
   const production = state.productions.find((item) => item.id === productionId);
   if (!production || production.voidedAt) return;
-  production.requirementsSnapshot.forEach((line) => {
-    const ingredient = ingredientById(line.ingredientId);
-    if (ingredient) ingredient.stock += Number(line.required);
-  });
+  const homeAdjustments = state.stockAdjustments.filter((entry) => entry.sourceProductionId === production.id && !entry.voidedAt);
+  try { state.ingredients = reverseProductionStock(state.ingredients, production.requirementsSnapshot, homeAdjustments); }
+  catch (error) { return toast(error.message); }
+  homeAdjustments.forEach((entry) => { entry.voidedAt = new Date().toISOString(); });
   production.voidedAt = new Date().toISOString();
   persist("Producción anulada e insumos devueltos");
 }
 
 function openProductionDialog() {
-  const modal = dialog(`<h2>Registrar producción</h2><p>Una tanda equivale al rendimiento indicado en la receta.</p><form><div class="form-grid"><div class="field full"><label>Producto</label><select name="productId">${state.products.map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad de tandas</label><input name="batches" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><div id="production-preview" class="production-preview"></div></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary" id="save-production">Registrar y descontar</button></div></form>`);
+  const modal = dialog(`<h2>Registrar producción</h2><p>Si falta stock registrado, podés indicar que usaste insumos de casa.</p><form><div class="form-grid"><div class="field full"><label>Producto</label><select name="productId">${state.products.map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad de tandas</label><input name="batches" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><div id="production-preview" class="production-preview"></div></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary" id="save-production">Registrar y descontar</button></div></form>`);
   const form = modal.querySelector("form");
   const preview = form.querySelector("#production-preview");
+  const homeValues = () => Object.fromEntries([...preview.querySelectorAll("[data-home-cost]")].map((field) => [field.dataset.homeCost, Number(field.value || 0)]));
+  const refreshCost = () => {
+    try {
+      const result = productionWithHomeSupply(productById(form.elements.productId.value), state.ingredients, Number(form.elements.batches.value || 1), homeValues());
+      preview.querySelector("#production-cost").textContent = money.format(result.plan.totalCost);
+    } catch { /* El formulario nativo señala valores incompletos. */ }
+  };
   const updatePreview = () => {
     const product = productById(form.elements.productId.value);
     const plan = productionPlan(product, state.ingredients, Number(form.elements.batches.value || 1));
-    preview.innerHTML = `<div class="cost-preview"><span>Se obtendrán <strong>${decimal.format(plan.producedQuantity)}</strong> unidades</span><strong>${money.format(plan.totalCost)}</strong></div><div class="requirement-list">${plan.requirements.map((line) => `<div class="requirement ${line.enough ? "enough" : "missing"}"><span>${h(line.name)}</span><span>${decimal.format(line.required)} ${line.unit} / ${decimal.format(line.available)} ${line.unit}</span></div>`).join("")}</div>${plan.canProduce ? "" : `<p class="warning">No hay suficientes insumos para esta producción.</p>`}`;
-    form.querySelector("#save-production").disabled = !plan.canProduce;
+    preview.innerHTML = `<div class="cost-preview"><span>Se obtendrá${plan.producedQuantity === 1 ? "" : "n"} <strong>${decimal.format(plan.producedQuantity)}</strong> ${plan.producedQuantity === 1 ? "unidad" : "unidades"}</span><strong id="production-cost">${money.format(plan.totalCost)}</strong></div><div class="requirement-list">${plan.requirements.map((line) => `<div class="requirement ${line.enough ? "enough" : "missing"}"><span>${h(line.name)}</span><span>${decimal.format(line.required)} ${h(line.unit)} / ${decimal.format(line.available)} ${h(line.unit)}</span></div>`).join("")}</div>${plan.canProduce ? "" : `<div class="warning"><strong>Falta stock registrado.</strong> Si usaste insumos de casa, indicá el valor aproximado de lo que faltó. El aporte quedará en el historial, no en Compras.${plan.requirements.filter((line) => !line.enough).map((line) => `<div class="field home-cost-field"><label>Valor de ${decimal.format(line.required - line.available)} ${h(line.unit)} de ${h(line.name)} ($)</label><input data-home-cost="${h(line.ingredientId)}" type="number" min="0" step="0.01" value="${((line.required - line.available) * Number(ingredientById(line.ingredientId)?.averageCost || 0)).toFixed(2)}"><small>Si no conocés el valor, dejá cero y el costo se marcará como parcial.</small></div>`).join("")}</div>`}`;
+    form.querySelector("#save-production").textContent = plan.canProduce ? "Registrar y descontar" : "Registrar con insumos de casa";
+    preview.querySelectorAll("[data-home-cost]").forEach((field) => field.addEventListener("input", refreshCost));
+    refreshCost();
   };
   form.elements.productId.addEventListener("change", updatePreview);
   form.elements.batches.addEventListener("input", updatePreview);
@@ -326,10 +368,18 @@ function openProductionDialog() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const product = productById(form.elements.productId.value);
-    const plan = productionPlan(product, state.ingredients, Number(form.elements.batches.value));
-    if (!plan.canProduce) return toast("Faltan insumos para producir");
-    plan.requirements.forEach((line) => { ingredientById(line.ingredientId).stock -= line.required; });
-    state.productions.push({ id: uid("prod"), productId: product.id, date: form.elements.date.value, batches: plan.batches, producedQuantity: plan.producedQuantity, totalCostSnapshot: plan.totalCost, unitCostSnapshot: plan.unitCost, requirementsSnapshot: plan.requirements });
+    let result;
+    try { result = productionWithHomeSupply(product, state.ingredients, Number(form.elements.batches.value), homeValues()); }
+    catch (error) { return toast(error.message); }
+    const productionId = uid("prod");
+    result.ingredients.forEach((updated) => {
+      const ingredient = ingredientById(updated.id);
+      ingredient.stock = updated.stock;
+      ingredient.averageCost = updated.averageCost;
+    });
+    result.adjustments.forEach((entry) => state.stockAdjustments.push({ ...entry, id: uid("adj"), ingredientName: ingredientById(entry.ingredientId).name, unit: ingredientById(entry.ingredientId).baseUnit, reason: "production", note: `Producción de ${product.name}`, date: form.elements.date.value, createdAt: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null, sourceProductionId: productionId }));
+    result.plan.requirements.forEach((line) => { ingredientById(line.ingredientId).stock -= line.required; });
+    state.productions.push({ id: productionId, productId: product.id, date: form.elements.date.value, batches: result.plan.batches, producedQuantity: result.plan.producedQuantity, totalCostSnapshot: result.plan.totalCost, unitCostSnapshot: result.plan.unitCost, costUnestimated: result.costUnestimated, requirementsSnapshot: result.plan.requirements });
     modal.close();
     persist("Producción registrada e insumos descontados");
   });
@@ -472,10 +522,10 @@ function renderData() {
   const restoringDisabled = cloudAccount && (cloudWriteBlocked || !["active", "grace"].includes(cloudAccount.status));
   app.innerHTML = pageHeading("Datos y respaldos", "Descargá una copia o restaurá información desde un archivo válido.") + `
     <div class="backup-grid">
-      <article class="card backup-card"><div class="backup-icon">↓</div><div><h2>Crear respaldo</h2><p>Descarga todos los insumos, recetas, clientes, pedidos, producciones y ventas en un único archivo JSON.</p></div><button class="primary" id="download-backup">Descargar respaldo</button></article>
+      <article class="card backup-card"><div class="backup-icon">↓</div><div><h2>Crear respaldo</h2><p>Descarga los insumos, el historial de ajustes, las recetas, compras, clientes, pedidos, producciones y ventas en un único archivo JSON.</p></div><button class="primary" id="download-backup">Descargar respaldo</button></article>
       <article class="card backup-card"><div class="backup-icon">↑</div><div><h2>Restaurar respaldo</h2><p>El archivo se revisará antes de reemplazar los datos actuales. También se aceptan respaldos de la versión anterior.</p></div><button class="secondary" id="choose-backup" ${restoringDisabled ? "disabled" : ""}>Elegir archivo</button><input id="backup-file" type="file" accept="application/json,.json" hidden></article>
     </div>
-    <article class="card data-summary"><h3>${cloudAccount ? "Datos del negocio" : "Contenido actual de este dispositivo"}</h3><div>${Object.entries({ Insumos: summary.ingredients, Compras: summary.purchases, Productos: summary.products, Producciones: summary.productions, Clientes: summary.clients, Pedidos: summary.orders, Ventas: summary.sales }).map(([label, value]) => `<span><strong>${value}</strong><small>${label}</small></span>`).join("")}</div><p class="warning"><strong>Importante:</strong> ${cloudAccount ? cloudWriteBlocked ? "Hay cambios pendientes de sincronización. Descargá un respaldo del borrador." : "Descargá respaldos periódicos además de la sincronización." : "La información vive solamente en este navegador. Descargá respaldos con frecuencia."}</p></article>`;
+    <article class="card data-summary"><h3>${cloudAccount ? "Datos del negocio" : "Contenido actual de este dispositivo"}</h3><div>${Object.entries({ Insumos: summary.ingredients, Ajustes: summary.stockAdjustments, Compras: summary.purchases, Productos: summary.products, Producciones: summary.productions, Clientes: summary.clients, Pedidos: summary.orders, Ventas: summary.sales }).map(([label, value]) => `<span><strong>${value}</strong><small>${label}</small></span>`).join("")}</div><p class="warning"><strong>Importante:</strong> ${cloudAccount ? cloudWriteBlocked ? "Hay cambios pendientes de sincronización. Descargá un respaldo del borrador." : "Descargá respaldos periódicos además de la sincronización." : "La información vive solamente en este navegador. Descargá respaldos con frecuencia."}</p></article>`;
   app.querySelector("#download-backup").addEventListener("click", () => { exportState(state); toast("Respaldo descargado"); });
   const fileInput = app.querySelector("#backup-file");
   app.querySelector("#choose-backup").addEventListener("click", () => fileInput.click());
@@ -486,7 +536,7 @@ function renderData() {
     try {
       const backup = parseBackup(await file.text());
       const incoming = backupSummary(backup.data);
-      const detail = `${incoming.ingredients} insumos, ${incoming.products} productos, ${incoming.clients} clientes, ${incoming.orders} pedidos y ${incoming.sales} ventas`;
+      const detail = `${incoming.ingredients} insumos, ${incoming.stockAdjustments} ajustes de stock, ${incoming.products} productos, ${incoming.clients} clientes, ${incoming.orders} pedidos y ${incoming.sales} ventas`;
       confirmAction("Restaurar respaldo", `Se reemplazarán los datos de este navegador por: ${detail}. Esta acción no se puede deshacer sin un respaldo de la información actual.`, "Restaurar datos", () => {
         state = backup.data;
         persist(backup.legacy ? "Respaldo anterior restaurado" : "Respaldo restaurado");
