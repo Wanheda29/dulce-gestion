@@ -27,6 +27,7 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 - Gastos opcionales: envases, mano de obra, gas, electricidad, reparto y otros.
 - Ventas con una fotografía del costo al momento de registrarlas.
 - Pedidos con cliente, teléfono opcional, fecha de entrega, seña, saldo, notas y estado. Se muestran del más reciente al más antiguo; al eliminarlos salen de la vista y la agenda, pero sus ventas vinculadas permanecen.
+- Filtros de pedidos por cliente y estado, con un máximo de 8 pedidos por página.
 - Fichero de clientes reutilizable, con opción de eliminación sin borrar los pedidos registrados, y agenda de entregas agrupada por fecha.
 - Producciones mostradas del registro más reciente al más antiguo.
 - Anulación auditable de producciones con devolución exacta de insumos.
@@ -34,6 +35,7 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 - Integración opcional con Supabase para login, sincronización y control del estado comercial.
 - Conversión automática y única de un pedido entregado en una venta.
 - Informe mensual y exportación de respaldo.
+- Informe mensual filtrable por cliente; las ventas directas pueden registrar un cliente opcional, y las anteriores sin ese dato se muestran como «Sin cliente».
 - PWA instalable. La cuenta y la sincronización requieren conexión a Internet.
 
 ## Conexión con Supabase

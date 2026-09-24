@@ -1,4 +1,4 @@
-import { correctPurchaseInventory, countedStock, marginPercent, monthlySummary, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
+import { correctPurchaseInventory, countedStock, customerKey, marginPercent, monthlySummary, pagedOrders, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
@@ -46,6 +46,12 @@ const currentMonth = () => today().slice(0, 7);
 const ingredientById = (id) => state.ingredients.find((item) => item.id === id);
 const productById = (id) => state.products.find((item) => item.id === id);
 const clientById = (id) => state.clients.find((item) => item.id === id);
+const saleCustomerName = (sale) => resolveSaleCustomerName(sale, state.orders);
+const customerOptions = (names, selected) => [...new Map(names.filter(Boolean).map((name) => [customerKey(name), name.trim()])).entries()]
+  .sort((a, b) => a[1].localeCompare(b[1], "es"))
+  .map(([key, label]) => `<option value="${h(key)}" ${selected === key ? "selected" : ""}>${h(label)}</option>`).join("");
+let orderFilters = { client: "", status: "", page: 1 };
+let reportClientFilter = "";
 
 document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-UY", { dateStyle: "long" }).format(new Date());
 document.querySelector("#data-button").addEventListener("click", () => { location.hash = "datos"; });
@@ -488,15 +494,23 @@ function renderAgenda() {
 }
 
 function renderOrders() {
-  const orders = state.orders.filter((order) => !order.deletedAt).slice().reverse();
+  const activeOrders = state.orders.filter((order) => !order.deletedAt);
+  const { items: orders, total, page, pageCount } = pagedOrders(state.orders, orderFilters);
+  orderFilters.page = page;
   app.innerHTML = pageHeading("Pedidos", "Organizá encargos, señas, saldos y fechas de entrega.", `<button class="primary" id="new-order" ${state.products.length ? "" : "disabled"}>Nuevo pedido</button>`) + `
     ${!state.products.length ? `<p class="warning">Antes de tomar un pedido necesitás crear al menos un producto.</p>` : ""}
+    <div class="filter-bar"><div class="field"><label for="order-client-filter">Cliente</label><select id="order-client-filter"><option value="">Todos los clientes</option>${customerOptions([...state.clients.map((client) => client.name), ...activeOrders.map((order) => order.customerName)], orderFilters.client)}</select></div><div class="field"><label for="order-status-filter">Estado</label><select id="order-status-filter"><option value="">Todos los estados</option>${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${orderFilters.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></div></div>
     ${orders.length ? `<div class="order-grid">${orders.map((order) => {
       const product = productById(order.productId);
       const balance = Math.max(order.totalPrice - order.deposit, 0);
       return `<article class="card order-card"><div class="order-card-head"><div><span class="status status-${order.status}">${statusLabels[order.status]}</span><h2>${h(order.customerName)}</h2><p>${h(product?.name || "Producto eliminado")} · ${decimal.format(order.quantity)} unidad${order.quantity === 1 ? "" : "es"}</p></div><time>${order.deliveryDate}</time></div><div class="order-finance"><div><small>Total</small><strong>${money.format(order.totalPrice)}</strong></div><div><small>Seña</small><strong>${money.format(order.deposit)}</strong></div><div><small>Saldo</small><strong>${money.format(balance)}</strong></div></div>${order.notes ? `<p class="order-notes">${h(order.notes)}</p>` : ""}<div class="order-actions"><label>Estado <select data-order-status="${order.id}" ${order.status === "entregado" ? "disabled" : ""}>${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${order.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>${!["entregado", "cancelado"].includes(order.status) ? `<button class="ghost" data-edit-order="${order.id}">Editar</button>` : ""}<button class="danger" data-delete-order="${order.id}">Eliminar</button></div>${order.saleId ? `<small class="sale-linked">✓ Venta registrada</small>` : ""}</article>`;
-    }).join("")}</div>` : `<article class="card">${empty("Todavía no hay pedidos. Creá el primero para organizar la próxima entrega.")}</article>`}`;
+    }).join("")}</div>` : `<article class="card">${empty(activeOrders.length ? "No hay pedidos con estos filtros." : "Todavía no hay pedidos. Creá el primero para organizar la próxima entrega.")}</article>`}
+    <nav class="pagination" aria-label="Páginas de pedidos"><span>${total} pedido${total === 1 ? "" : "s"} · Página ${page} de ${pageCount}</span><div class="row-actions"><button class="ghost" id="previous-orders" ${page === 1 ? "disabled" : ""}>Anterior</button><button class="ghost" id="next-orders" ${page === pageCount ? "disabled" : ""}>Siguiente</button></div></nav>`;
   app.querySelector("#new-order")?.addEventListener("click", () => openOrderDialog());
+  app.querySelector("#order-client-filter").addEventListener("change", (event) => { orderFilters.client = event.target.value; orderFilters.page = 1; renderOrders(); });
+  app.querySelector("#order-status-filter").addEventListener("change", (event) => { orderFilters.status = event.target.value; orderFilters.page = 1; renderOrders(); });
+  app.querySelector("#previous-orders").addEventListener("click", () => { orderFilters.page -= 1; renderOrders(); });
+  app.querySelector("#next-orders").addEventListener("click", () => { orderFilters.page += 1; renderOrders(); });
   app.querySelectorAll("[data-edit-order]").forEach((button) => button.addEventListener("click", () => openOrderDialog(state.orders.find((order) => order.id === button.dataset.editOrder))));
   app.querySelectorAll("[data-delete-order]").forEach((button) => button.addEventListener("click", () => deleteOrder(button.dataset.deleteOrder)));
   app.querySelectorAll("[data-order-status]").forEach((select) => select.addEventListener("change", () => updateOrderStatus(select.dataset.orderStatus, select.value)));
@@ -566,17 +580,22 @@ function renderSales() {
 }
 
 function openSaleDialog() {
-  const modal = dialog(`<h2>Registrar venta</h2><p>Podés cambiar el precio para este encargo sin modificar el producto.</p><form><div class="form-grid"><div class="field full"><label>Producto</label><select name="productId">${state.products.map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio por unidad ($)</label><input name="unitPrice" type="number" min="0" step="0.01" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar venta</button></div></form>`);
+  const modal = dialog(`<h2>Registrar venta</h2><p>Podés cambiar el precio para este encargo sin modificar el producto. El cliente es opcional.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}">${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field full"><label>Nombre del cliente (opcional)</label><input name="customerName" placeholder="Ej. Lucía"></div><div class="field full"><label>Producto</label><select name="productId">${state.products.map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio por unidad ($)</label><input name="unitPrice" type="number" min="0" step="0.01" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar venta</button></div></form>`);
   const form = modal.querySelector("form");
   const setPrice = () => { form.elements.unitPrice.value = productById(form.elements.productId.value).salePrice; };
   form.elements.productId.addEventListener("change", setPrice);
+  if (form.elements.clientId) form.elements.clientId.addEventListener("change", () => {
+    form.elements.customerName.value = clientById(form.elements.clientId.value)?.name || "";
+  });
   setPrice();
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const product = productById(data.get("productId"));
     const cost = recipeCost(product, state.ingredients).unitCost;
-    state.sales.push({ id: uid("sale"), productId: product.id, quantity: Number(data.get("quantity")), unitPrice: Number(data.get("unitPrice")), unitCostSnapshot: cost, date: data.get("date") });
+    const customerName = String(data.get("customerName") || "").trim();
+    const selectedClient = clientById(data.get("clientId"));
+    state.sales.push({ id: uid("sale"), productId: product.id, quantity: Number(data.get("quantity")), unitPrice: Number(data.get("unitPrice")), unitCostSnapshot: cost, date: data.get("date"), customerName, clientId: selectedClient && customerKey(selectedClient.name) === customerKey(customerName) ? selectedClient.id : null });
     modal.close();
     persist("Venta registrada");
   });
@@ -584,16 +603,23 @@ function openSaleDialog() {
 
 function renderReports() {
   const month = app.dataset.reportMonth || currentMonth();
-  const summary = monthlySummary(state.sales, month);
+  const sales = state.sales.filter((sale) => sale.date.startsWith(month) && (!reportClientFilter || (reportClientFilter === "__no_client__" ? !saleCustomerName(sale) : customerKey(saleCustomerName(sale)) === reportClientFilter)));
+  const summary = monthlySummary(sales, month);
   const productRows = state.products.map((product) => {
-    const sales = state.sales.filter((sale) => sale.productId === product.id && sale.date.startsWith(month));
-    const units = sales.reduce((total, sale) => total + sale.quantity, 0);
-    const revenue = sales.reduce((total, sale) => total + sale.quantity * sale.unitPrice, 0);
-    const profit = sales.reduce((total, sale) => total + sale.quantity * (sale.unitPrice - sale.unitCostSnapshot), 0);
+    const productSales = sales.filter((sale) => sale.productId === product.id);
+    const units = productSales.reduce((total, sale) => total + sale.quantity, 0);
+    const revenue = productSales.reduce((total, sale) => total + sale.quantity * sale.unitPrice, 0);
+    const profit = productSales.reduce((total, sale) => total + sale.quantity * (sale.unitPrice - sale.unitCostSnapshot), 0);
     return { product, units, revenue, profit };
   }).filter((row) => row.units > 0).sort((a, b) => b.revenue - a.revenue);
-  app.innerHTML = pageHeading("Informe mensual", "Ingresos y costos históricos de las ventas registradas.", `<div class="field"><label for="report-month">Mes</label><input id="report-month" type="month" value="${month}"></div>`) + `<div class="stats"><article class="stat"><small>Encargos</small><strong>${summary.orders}</strong></article><article class="stat"><small>Ingresos</small><strong>${money.format(summary.revenue)}</strong></article><article class="stat"><small>Costos</small><strong>${money.format(summary.cost)}</strong></article><article class="stat"><small>Ganancia bruta</small><strong class="positive">${money.format(summary.profit)}</strong></article></div><article class="card"><h3>Resultados por producto</h3>${productRows.length ? `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Unidades</th><th>Ingresos</th><th>Ganancia</th></tr></thead><tbody>${productRows.map((row) => `<tr><td><strong>${h(row.product.name)}</strong></td><td>${decimal.format(row.units)}</td><td>${money.format(row.revenue)}</td><td>${money.format(row.profit)}</td></tr>`).join("")}</tbody></table></div>` : empty("No hay ventas en el mes seleccionado.")}</article>`;
+  const sortedSales = [...sales].sort((a, b) => b.date.localeCompare(a.date));
+  app.innerHTML = pageHeading("Informe mensual", "Ingresos y costos históricos de las ventas registradas.") + `
+    <div class="filter-bar"><div class="field"><label for="report-month">Mes</label><input id="report-month" type="month" value="${h(month)}"></div><div class="field"><label for="report-client-filter">Cliente</label><select id="report-client-filter"><option value="">Todos los clientes</option>${customerOptions([...state.clients.map((client) => client.name), ...state.sales.map(saleCustomerName)], reportClientFilter)}<option value="__no_client__" ${reportClientFilter === "__no_client__" ? "selected" : ""}>Sin cliente</option></select></div></div>
+    <div class="stats"><article class="stat"><small>Encargos</small><strong>${summary.orders}</strong></article><article class="stat"><small>Ingresos</small><strong>${money.format(summary.revenue)}</strong></article><article class="stat"><small>Costos</small><strong>${money.format(summary.cost)}</strong></article><article class="stat"><small>Ganancia bruta</small><strong class="positive">${money.format(summary.profit)}</strong></article></div>
+    <article class="card"><h3>Resultados por producto</h3>${productRows.length ? `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Unidades</th><th>Ingresos</th><th>Ganancia</th></tr></thead><tbody>${productRows.map((row) => `<tr><td><strong>${h(row.product.name)}</strong></td><td>${decimal.format(row.units)}</td><td>${money.format(row.revenue)}</td><td>${money.format(row.profit)}</td></tr>`).join("")}</tbody></table></div>` : empty("No hay ventas con estos filtros.")}</article>
+    <article class="card stock-history"><h3>Ventas del período</h3>${sortedSales.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Producto</th><th>Ingresos</th><th>Ganancia</th></tr></thead><tbody>${sortedSales.map((sale) => `<tr><td>${h(sale.date)}</td><td>${h(saleCustomerName(sale) || "Sin cliente")}</td><td>${h(productById(sale.productId)?.name || "Producto eliminado")}</td><td>${money.format(sale.quantity * sale.unitPrice)}</td><td>${money.format(sale.quantity * (sale.unitPrice - sale.unitCostSnapshot))}</td></tr>`).join("")}</tbody></table></div>` : empty("No hay ventas con estos filtros.")}</article>`;
   app.querySelector("#report-month").addEventListener("change", (event) => { app.dataset.reportMonth = event.target.value; renderReports(); });
+  app.querySelector("#report-client-filter").addEventListener("change", (event) => { reportClientFilter = event.target.value; renderReports(); });
 }
 
 function renderData() {

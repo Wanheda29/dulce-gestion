@@ -150,6 +150,20 @@ export function monthKey(date) {
   return String(date).slice(0, 7);
 }
 
+export const customerKey = (name) => String(name || "").trim().toLocaleLowerCase("es");
+
+export function saleCustomerName(sale, orders) {
+  return sale.customerName?.trim() || orders.find((order) => order.id === sale.sourceOrderId)?.customerName?.trim() || "";
+}
+
+export function pagedOrders(orders, { client = "", status = "", page = 1, pageSize = 8 } = {}) {
+  const filtered = orders.filter((order) => !order.deletedAt && (!client || customerKey(order.customerName) === client)
+    && (!status || order.status === status)).slice().reverse();
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(Math.max(1, page), pageCount);
+  return { items: filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), total: filtered.length, page: currentPage, pageCount };
+}
+
 export function monthlySummary(sales, month) {
   return sales
     .filter((sale) => monthKey(sale.date) === month)
@@ -179,6 +193,8 @@ export function saleFromOrder(order, product, ingredients, date, id) {
     unitCostSnapshot: recipeCost(product, ingredients).unitCost,
     date,
     sourceOrderId: order.id,
+    clientId: order.clientId || null,
+    customerName: order.customerName || "",
   };
 }
 

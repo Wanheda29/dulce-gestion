@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { correctPurchaseInventory, countedStock, marginPercent, monthlySummary, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
+import { correctPurchaseInventory, countedStock, customerKey, marginPercent, monthlySummary, pagedOrders, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
 
 test("convierte kilogramos a gramos", () => assert.equal(toBaseQuantity(2.5, "kg", "g"), 2500));
 
@@ -55,10 +55,31 @@ test("resume ventas usando el costo histórico", () => {
 test("convierte un pedido entregado en una venta con costo congelado", () => {
   const ingredients = [{ id: "harina", averageCost: 0.1 }];
   const product = { id: "torta", yieldQuantity: 1, recipe: [{ ingredientId: "harina", quantity: 500 }] };
-  const order = { id: "pedido-1", productId: "torta", quantity: 2, totalPrice: 1200 };
+  const order = { id: "pedido-1", productId: "torta", quantity: 2, totalPrice: 1200, clientId: "cliente-1", customerName: "Lucía" };
   assert.deepEqual(saleFromOrder(order, product, ingredients, "2026-09-18", "venta-1"), {
-    id: "venta-1", productId: "torta", quantity: 2, unitPrice: 600, unitCostSnapshot: 50, date: "2026-09-18", sourceOrderId: "pedido-1",
+    id: "venta-1", productId: "torta", quantity: 2, unitPrice: 600, unitCostSnapshot: 50, date: "2026-09-18", sourceOrderId: "pedido-1", clientId: "cliente-1", customerName: "Lucía",
   });
+});
+
+test("recupera el cliente de ventas anteriores vinculadas a pedidos", () => {
+  const orders = [{ id: "pedido-viejo", customerName: "Ana" }];
+  assert.equal(saleCustomerName({ sourceOrderId: "pedido-viejo" }, orders), "Ana");
+  assert.equal(saleCustomerName({ customerName: "Lucía", sourceOrderId: "pedido-viejo" }, orders), "Lucía");
+  assert.equal(saleCustomerName({ productId: "torta" }, orders), "");
+});
+
+test("filtra pedidos por cliente y estado y muestra hasta ocho por página", () => {
+  const orders = Array.from({ length: 18 }, (_, index) => ({ id: String(index + 1), customerName: index % 2 ? "LUCÍA" : "Ana", status: index % 2 ? "listo" : "pendiente" }));
+  assert.equal(customerKey(" Lucía "), "lucía");
+  const first = pagedOrders(orders, { page: 1 });
+  assert.deepEqual(first.items.map((order) => order.id), ["18", "17", "16", "15", "14", "13", "12", "11"]);
+  assert.equal(first.pageCount, 3);
+  assert.deepEqual(pagedOrders(orders, { page: 2 }).items.map((order) => order.id), ["10", "9", "8", "7", "6", "5", "4", "3"]);
+  const filtered = pagedOrders(orders, { client: customerKey("Lucía"), status: "listo", page: 2 });
+  assert.equal(filtered.total, 9);
+  assert.deepEqual(filtered.items.map((order) => order.id), ["2"]);
+  orders[17].deletedAt = "2026-09-23";
+  assert.equal(pagedOrders(orders, { client: customerKey("Lucía"), status: "listo", page: 99 }).page, 1);
 });
 
 test("planifica una producción y detecta insumos insuficientes", () => {
