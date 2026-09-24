@@ -1,10 +1,11 @@
-import { correctPurchaseInventory, countedStock, customerKey, marginPercent, monthlySummary, pagedOrders, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
+import { correctPurchaseInventory, countedStock, customerKey, deleteProductionRecord, marginPercent, monthlySummary, pagedOrders, productionCostBreakdown, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
 let state = isCloudConfigured() ? structuredClone(emptyState) : loadState();
 const app = document.querySelector("#app");
 const money = new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", maximumFractionDigits: 0 });
+const preciseMoney = new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const decimal = new Intl.NumberFormat("es-UY", { maximumFractionDigits: 2 });
 const titles = { inicio: "Resumen", insumos: "Insumos", compras: "Compras", productos: "Productos y recetas", produccion: "Producción", clientes: "Clientes", pedidos: "Pedidos", agenda: "Agenda", ventas: "Ventas", informes: "Informes", datos: "Datos y respaldos", cuenta: "Cuenta" };
 const optionalLabels = { packaging: "Envases", labor: "Mano de obra", gas: "Gas", electricity: "Electricidad", delivery: "Reparto", other: "Otros" };
@@ -386,23 +387,66 @@ function openProductDialog(existing = null) {
 }
 
 function renderProduction() {
-  const productions = [...state.productions].reverse();
+  const productions = state.productions.filter((item) => !item.deletedAt).slice().reverse();
   app.innerHTML = pageHeading("Producción", "Registrá cada elaboración y descontá sus insumos del inventario.", `<button class="primary" id="new-production" ${state.products.length ? "" : "disabled"}>Registrar producción</button>`) + `
     ${!state.products.length ? `<p class="warning">Necesitás un producto con receta antes de registrar una producción.</p>` : ""}
-    <article class="card">${productions.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tandas</th><th>Unidades obtenidas</th><th>Costo total</th><th>Estado</th><th></th></tr></thead><tbody>${productions.map((production) => `<tr class="${production.voidedAt ? "voided-row" : ""}"><td>${production.date}</td><td><strong>${h(productById(production.productId)?.name || "Producto eliminado")}</strong></td><td>${decimal.format(production.batches)}</td><td>${decimal.format(production.producedQuantity)}</td><td>${money.format(production.totalCostSnapshot)}${production.costUnestimated ? `<small class="history-note muted">Costo parcial: aporte sin estimar</small>` : ""}</td><td>${production.voidedAt ? `<span class="status status-cancelado">Anulada</span>` : `<span class="status status-entregado">Registrada</span>`}</td><td class="actions">${production.voidedAt ? "" : `<button class="danger compact-button" data-void-production="${production.id}">Anular</button>`}</td></tr>`).join("")}</tbody></table></div>` : empty("Las elaboraciones registradas aparecerán aquí.")}</article>`;
+    <article class="card">${productions.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tandas</th><th>Unidades obtenidas</th><th>Costo total</th><th>Estado</th><th></th></tr></thead><tbody>${productions.map((production) => `<tr class="production-row ${production.voidedAt ? "voided-row" : ""}" data-production-details="${production.id}"><td>${h(production.date)}</td><td><button class="production-name" data-open-production="${production.id}">${h(production.productNameSnapshot || productById(production.productId)?.name || "Producto eliminado")}<small>Ver desglose</small></button></td><td>${decimal.format(production.batches)}</td><td>${decimal.format(production.producedQuantity)}</td><td>${money.format(production.totalCostSnapshot)}${production.costUnestimated ? `<small class="history-note muted">Costo parcial: aporte sin estimar</small>` : ""}</td><td>${production.voidedAt ? `<span class="status status-cancelado">Anulada</span>` : `<span class="status status-entregado">Registrada</span>`}</td><td class="actions"><div class="row-actions">${production.voidedAt ? "" : `<button class="ghost compact-button" data-void-production="${production.id}">Anular</button>`}<button class="danger compact-button" data-delete-production="${production.id}">Eliminar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Las elaboraciones registradas aparecerán aquí.")}</article>`;
   app.querySelector("#new-production")?.addEventListener("click", openProductionDialog);
+  app.querySelectorAll("[data-production-details]").forEach((row) => row.addEventListener("click", (event) => {
+    if (event.target.closest("[data-void-production], [data-delete-production]")) return;
+    openProductionDetails(row.dataset.productionDetails);
+  }));
   app.querySelectorAll("[data-void-production]").forEach((button) => button.addEventListener("click", () => confirmAction("Anular producción", "Se devolverán los insumos descontados y se revertirán los aportes automáticos de casa. El registro permanecerá visible como anulado.", "Anular producción", () => voidProduction(button.dataset.voidProduction))));
+  app.querySelectorAll("[data-delete-production]").forEach((button) => button.addEventListener("click", () => deleteProduction(button.dataset.deleteProduction)));
+}
+
+function openProductionDetails(productionId) {
+  const production = state.productions.find((item) => item.id === productionId && !item.deletedAt);
+  if (!production) return;
+  const breakdown = productionCostBreakdown(production);
+  const optionalLines = breakdown.optionalLines === null && breakdown.optionalCost > 0
+    ? [{ label: "Otros gastos (detalle anterior no disponible)", totalCost: breakdown.optionalCost }]
+    : breakdown.optionalLines || [];
+  dialog(`<h2>Desglose de producción</h2><p>${h(production.productNameSnapshot || productById(production.productId)?.name || "Producto eliminado")} · ${h(production.date)} · ${decimal.format(production.batches)} tanda${production.batches === 1 ? "" : "s"} · ${decimal.format(production.producedQuantity)} ${production.producedQuantity === 1 ? "unidad" : "unidades"}</p>
+    ${production.voidedAt ? `<p class="warning">Esta producción fue anulada. Los importes son los registrados originalmente.</p>` : ""}
+    ${production.costUnestimated ? `<p class="warning">Costo parcial: se utilizaron insumos de casa sin valor estimado.</p>` : ""}
+    <div class="breakdown"><h3>Insumos</h3>${breakdown.ingredients.length ? breakdown.ingredients.map((line) => `<div class="breakdown-line"><span>${h(line.name)}<small>${decimal.format(line.quantity)} ${h(line.unit)} · ${preciseMoney.format(line.quantity ? line.cost / line.quantity : 0)} por ${h(line.unit || "unidad")}</small></span><strong>${preciseMoney.format(line.cost)}</strong></div>`).join("") : `<p class="muted">No se registraron insumos.</p>`}<div class="breakdown-line subtotal"><span>Subtotal de insumos</span><strong>${preciseMoney.format(breakdown.ingredientCost)}</strong></div>
+    <h3>Gastos adicionales</h3>${optionalLines.length ? optionalLines.map((line) => `<div class="breakdown-line"><span>${h(line.label)}</span><strong>${preciseMoney.format(line.totalCost)}</strong></div>`).join("") : `<p class="muted">No se incluyeron gastos adicionales.</p>`}<div class="breakdown-line subtotal"><span>Subtotal de gastos</span><strong>${preciseMoney.format(breakdown.optionalCost)}</strong></div>
+    <div class="breakdown-line total"><span>Costo total</span><strong>${preciseMoney.format(breakdown.totalCost)}</strong></div><div class="breakdown-line"><span>Costo por unidad obtenida</span><strong>${preciseMoney.format(breakdown.unitCost)}</strong></div></div>
+    <div class="form-actions"><button class="primary" data-close>Cerrar</button></div>`);
+}
+
+function reverseRegisteredProduction(production) {
+  const homeAdjustments = state.stockAdjustments.filter((entry) => entry.sourceProductionId === production.id && !entry.voidedAt);
+  const restoredIngredients = reverseProductionStock(state.ingredients, production.requirementsSnapshot, homeAdjustments);
+  state.ingredients = restoredIngredients;
+  homeAdjustments.forEach((entry) => { entry.voidedAt = new Date().toISOString(); });
+  production.voidedAt = new Date().toISOString();
 }
 
 function voidProduction(productionId) {
   const production = state.productions.find((item) => item.id === productionId);
-  if (!production || production.voidedAt) return;
-  const homeAdjustments = state.stockAdjustments.filter((entry) => entry.sourceProductionId === production.id && !entry.voidedAt);
-  try { state.ingredients = reverseProductionStock(state.ingredients, production.requirementsSnapshot, homeAdjustments); }
+  if (!production || production.voidedAt || production.deletedAt) return;
+  try { reverseRegisteredProduction(production); }
   catch (error) { return toast(error.message); }
-  homeAdjustments.forEach((entry) => { entry.voidedAt = new Date().toISOString(); });
-  production.voidedAt = new Date().toISOString();
   persist("Producción anulada e insumos devueltos");
+}
+
+function deleteProduction(productionId) {
+  const production = state.productions.find((item) => item.id === productionId && !item.deletedAt);
+  if (!production) return;
+  const message = production.voidedAt
+    ? "Se quitará esta producción anulada de la lista. El stock no cambiará otra vez. El respaldo conservará el registro."
+    : "Se quitará esta producción de la lista y se devolverán sus insumos al stock, como al anularla. El respaldo conservará el registro.";
+  confirmAction("Eliminar producción", message, "Eliminar producción", () => {
+    let result;
+    try { result = deleteProductionRecord(state.ingredients, state.stockAdjustments, production, new Date().toISOString(), cloudSession?.user?.email || null); }
+    catch (error) { return toast(error.message, 6000); }
+    state.ingredients = result.ingredients;
+    state.stockAdjustments = result.adjustments;
+    Object.assign(production, result.production);
+    persist("Producción eliminada e inventario actualizado");
+  });
 }
 
 function openProductionDialog() {
@@ -441,7 +485,8 @@ function openProductionDialog() {
     });
     result.adjustments.forEach((entry) => state.stockAdjustments.push({ ...entry, id: uid("adj"), ingredientName: ingredientById(entry.ingredientId).name, unit: ingredientById(entry.ingredientId).baseUnit, reason: "production", note: `Producción de ${product.name}`, date: form.elements.date.value, createdAt: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null, sourceProductionId: productionId }));
     result.plan.requirements.forEach((line) => { ingredientById(line.ingredientId).stock -= line.required; });
-    state.productions.push({ id: productionId, productId: product.id, date: form.elements.date.value, batches: result.plan.batches, producedQuantity: result.plan.producedQuantity, totalCostSnapshot: result.plan.totalCost, unitCostSnapshot: result.plan.unitCost, costUnestimated: result.costUnestimated, requirementsSnapshot: result.plan.requirements });
+    const optionalCostsSnapshot = Object.entries(product.optionalCosts || {}).map(([key, value]) => ({ label: optionalLabels[key] || key, totalCost: Number(value || 0) * result.plan.batches })).filter((line) => line.totalCost > 0);
+    state.productions.push({ id: productionId, productId: product.id, productNameSnapshot: product.name, date: form.elements.date.value, batches: result.plan.batches, producedQuantity: result.plan.producedQuantity, totalCostSnapshot: result.plan.totalCost, unitCostSnapshot: result.plan.unitCost, costUnestimated: result.costUnestimated, requirementsSnapshot: result.plan.requirements, optionalCostsSnapshot });
     modal.close();
     persist("Producción registrada e insumos descontados");
   });

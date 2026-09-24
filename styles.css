@@ -96,6 +96,19 @@ input:focus, select:focus { outline: 3px solid rgba(138,61,85,.14); border-color
 .compact-button { padding: 7px 11px; font-size: .8rem; }
 .card-title-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .production-preview { display: grid; gap: 12px; }
+.production-row { cursor: pointer; }
+.production-row:hover { background: #faf6f4; }
+.production-name { border: 0; padding: 4px 0; background: transparent; color: var(--berry); font: inherit; font-weight: 750; text-align: left; cursor: pointer; }
+.production-name small { display: block; margin-top: 3px; color: var(--muted); font-size: .72rem; font-weight: 500; }
+.production-name:focus-visible { outline: 3px solid rgba(138,61,85,.3); border-radius: 4px; }
+.breakdown { display: grid; gap: 5px; }
+.breakdown h3 { margin: 20px 0 7px; font-size: 1rem; }
+.breakdown-line { display: flex; justify-content: space-between; align-items: start; gap: 18px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.breakdown-line span { min-width: 0; }
+.breakdown-line small { display: block; margin-top: 4px; color: var(--muted); font-size: .78rem; }
+.breakdown-line strong { flex-shrink: 0; }
+.breakdown-line.subtotal { font-weight: 700; }
+.breakdown-line.total { margin-top: 12px; padding: 14px; border: 0; border-radius: 12px; background: var(--mint); font-weight: 800; }
 .requirement-list { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .requirement { display: flex; justify-content: space-between; gap: 16px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: .88rem; }
 .requirement:last-child { border: 0; }
@@ -109,7 +122,7 @@ input:focus, select:focus { outline: 3px solid rgba(138,61,85,.14); border-color
 .home-cost-field label { color: var(--ink); }
 .home-cost-field small { font-weight: 400; }
 button:disabled { opacity: .45; cursor: not-allowed; }
-.voided-row { opacity: .55; text-decoration: line-through; }
+.voided-row { opacity: .65; }
 .client-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .client-card { display: grid; gap: 8px; }
 .client-card h2 { margin: 6px 0 0; font-family: Georgia, serif; }

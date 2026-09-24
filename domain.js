@@ -126,6 +126,17 @@ export function reverseProductionStock(ingredients, requirements, homeAdjustment
   return restored;
 }
 
+export function deleteProductionRecord(ingredients, adjustments, production, deletedAt, deletedBy = null) {
+  if (production.deletedAt) throw new Error("La producción ya fue eliminada.");
+  const active = !production.voidedAt;
+  const homeAdjustments = active ? adjustments.filter((entry) => entry.sourceProductionId === production.id && !entry.voidedAt) : [];
+  return {
+    ingredients: active ? reverseProductionStock(ingredients, production.requirementsSnapshot, homeAdjustments) : ingredients,
+    adjustments: active ? adjustments.map((entry) => homeAdjustments.includes(entry) ? { ...entry, voidedAt: deletedAt } : entry) : adjustments,
+    production: { ...production, voidedAt: production.voidedAt || deletedAt, deletedAt, deletedBy },
+  };
+}
+
 export function recipeCost(product, ingredients) {
   const ingredientCost = (product.recipe ?? []).reduce((total, line) => {
     const ingredient = ingredients.find((item) => item.id === line.ingredientId);
@@ -229,4 +240,18 @@ export function productionPlan(product, ingredients, batches = 1) {
     totalCost: costs.batchCost * batchCount,
     unitCost: costs.unitCost,
   };
+}
+
+export function productionCostBreakdown(production) {
+  const ingredients = (production.requirementsSnapshot || []).map((line) => ({
+    name: line.name || "Insumo eliminado",
+    quantity: Number(line.required || 0),
+    unit: line.unit || "",
+    cost: Number(line.cost || 0),
+  }));
+  const ingredientCost = ingredients.reduce((total, line) => total + line.cost, 0);
+  const totalCost = Number(production.totalCostSnapshot || 0);
+  const optionalCost = Math.max(0, totalCost - ingredientCost);
+  const optionalLines = production.optionalCostsSnapshot || null;
+  return { ingredients, ingredientCost, optionalCost, optionalLines, totalCost, unitCost: Number(production.unitCostSnapshot || 0) };
 }

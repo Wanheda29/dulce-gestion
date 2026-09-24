@@ -31,6 +31,7 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 - Fichero de clientes reutilizable, con opción de eliminación sin borrar los pedidos registrados, y agenda de entregas agrupada por fecha.
 - Producciones mostradas del registro más reciente al más antiguo.
 - Anulación auditable de producciones con devolución exacta de insumos.
+- Eliminación de producciones: desaparecen de la lista, revierten el stock si estaban activas y permanecen en el respaldo para auditoría. Cada producción muestra un desglose de sus costos históricos; las nuevas también guardan el detalle de gastos adicionales.
 - Respaldos versionados, restauración validada y compatibilidad con exportaciones anteriores.
 - Integración opcional con Supabase para login, sincronización y control del estado comercial.
 - Conversión automática y única de un pedido entregado en una venta.

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { correctPurchaseInventory, countedStock, customerKey, marginPercent, monthlySummary, pagedOrders, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
+import { correctPurchaseInventory, countedStock, customerKey, deleteProductionRecord, marginPercent, monthlySummary, pagedOrders, productionCostBreakdown, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
 
 test("convierte kilogramos a gramos", () => assert.equal(toBaseQuantity(2.5, "kg", "g"), 2500));
 
@@ -90,6 +90,27 @@ test("planifica una producción y detecta insumos insuficientes", () => {
   assert.equal(plan.unitCost, 12.5);
   assert.equal(plan.canProduce, false);
   assert.equal(plan.requirements[0].required, 1000);
+});
+
+test("desglosa costos históricos incluso si la receta actual cambia", () => {
+  const production = { totalCostSnapshot: 180, unitCostSnapshot: 30, requirementsSnapshot: [{ name: "Harina", required: 1000, unit: "g", cost: 80 }], optionalCostsSnapshot: [{ label: "Mano de obra", totalCost: 100 }] };
+  assert.deepEqual(productionCostBreakdown(production), {
+    ingredients: [{ name: "Harina", quantity: 1000, unit: "g", cost: 80 }],
+    ingredientCost: 80, optionalCost: 100, optionalLines: [{ label: "Mano de obra", totalCost: 100 }], totalCost: 180, unitCost: 30,
+  });
+  assert.equal(productionCostBreakdown({ ...production, optionalCostsSnapshot: undefined }).optionalLines, null);
+});
+
+test("eliminar producción activa revierte stock y eliminar una anulada no lo duplica", () => {
+  const ingredients = [{ id: "h", stock: 300, averageCost: 0.1 }];
+  const production = { id: "p", requirementsSnapshot: [{ ingredientId: "h", required: 200 }] };
+  const deleted = deleteProductionRecord(ingredients, [], production, "2026-09-23T12:00:00Z", "admin@example.com");
+  assert.equal(deleted.ingredients[0].stock, 500);
+  assert.equal(ingredients[0].stock, 300);
+  assert.equal(deleted.production.deletedBy, "admin@example.com");
+  const alreadyVoided = deleteProductionRecord(ingredients, [], { ...production, voidedAt: "2026-09-22T12:00:00Z" }, "2026-09-23T12:00:00Z");
+  assert.equal(alreadyVoided.ingredients[0].stock, 300);
+  assert.equal(alreadyVoided.production.voidedAt, "2026-09-22T12:00:00Z");
 });
 
 test("un recuento manual de stock conserva el costo al reducir y pondera al aumentar", () => {
