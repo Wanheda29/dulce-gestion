@@ -1,4 +1,4 @@
-import { countedStock, marginPercent, monthlySummary, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
+import { correctPurchaseInventory, countedStock, marginPercent, monthlySummary, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
@@ -105,11 +105,11 @@ function persist(message) {
   });
 }
 
-function toast(message) {
+function toast(message, duration = 2200) {
   const element = document.querySelector("#toast");
   element.textContent = message;
   element.classList.add("show");
-  setTimeout(() => element.classList.remove("show"), 2200);
+  setTimeout(() => element.classList.remove("show"), duration);
 }
 
 function pageHeading(title, description, button = "") {
@@ -179,7 +179,7 @@ function renderSyncProblem() {
 function renderDashboard() {
   const summary = monthlySummary(state.sales, currentMonth());
   const recent = [...state.sales].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
-  const upcoming = state.orders.filter((order) => !["entregado", "cancelado"].includes(order.status)).sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate)).slice(0, 5);
+  const upcoming = state.orders.filter((order) => !order.deletedAt && !["entregado", "cancelado"].includes(order.status)).sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate)).slice(0, 5);
   app.innerHTML = `
     <section class="hero">
       <div><p class="eyebrow">Tu negocio, con números claros</p><h2>Sabé cuánto cuesta antes de ponerle precio.</h2><p>Registrá compras, armá recetas y conservá el costo real de cada venta. Los gastos de gas, luz, reparto y trabajo siempre son opcionales.</p><div class="hero-actions"><button class="primary" data-go="pedidos">Nuevo pedido</button><button class="secondary" data-go="agenda">Ver agenda</button></div></div>
@@ -200,12 +200,27 @@ function renderDashboard() {
 function renderIngredients() {
   const adjustments = [...state.stockAdjustments].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   app.innerHTML = pageHeading("Insumos", "Registrá compras y corregí la existencia cuando el stock real cambie.", `<button class="primary" id="new-ingredient">Nuevo insumo</button>`) + `
-    <article class="card">${state.ingredients.length ? `<div class="table-wrap"><table><thead><tr><th>Insumo</th><th>Existencia</th><th>Costo por unidad</th><th>Valor en stock</th><th></th></tr></thead><tbody>${state.ingredients.map((item) => `<tr><td><strong>${h(item.name)}</strong></td><td>${decimal.format(item.stock)} ${item.baseUnit}</td><td>${money.format(item.averageCost)} / ${item.baseUnit}</td><td>${money.format(item.stock * item.averageCost)}</td><td class="actions"><div class="row-actions"><button class="ghost compact-button" data-adjust-ingredient="${item.id}">Ajustar stock</button><button class="ghost compact-button" data-edit-ingredient="${item.id}">Editar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Creá harina, azúcar, huevos o cualquier materia prima.", `<button class="primary" id="empty-ingredient">Crear primer insumo</button>`)}</article>
+    <article class="card">${state.ingredients.length ? `<div class="table-wrap"><table><thead><tr><th>Insumo</th><th>Existencia</th><th>Costo por unidad</th><th>Valor en stock</th><th></th></tr></thead><tbody>${state.ingredients.map((item) => `<tr><td><strong>${h(item.name)}</strong></td><td>${decimal.format(item.stock)} ${item.baseUnit}</td><td>${money.format(item.averageCost)} / ${item.baseUnit}</td><td>${money.format(item.stock * item.averageCost)}</td><td class="actions"><div class="row-actions"><button class="ghost compact-button" data-adjust-ingredient="${item.id}">Ajustar stock</button><button class="ghost compact-button" data-edit-ingredient="${item.id}">Editar</button><button class="danger compact-button" data-delete-ingredient="${item.id}">Eliminar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Creá harina, azúcar, huevos o cualquier materia prima.", `<button class="primary" id="empty-ingredient">Crear primer insumo</button>`)}</article>
     <article class="card stock-history"><h3>Historial de ajustes</h3><p class="muted">Los cambios manuales y los aportes desde casa quedan registrados aquí. Las compras se consultan en Compras.</p>${adjustments.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Insumo</th><th>Cambio</th><th>Existencia</th><th>Motivo</th><th>Valor agregado</th><th>Registrado por</th></tr></thead><tbody>${adjustments.map((entry) => `<tr><td>${h(entry.date || entry.createdAt?.slice(0, 10) || "")}</td><td><strong>${h(ingredientById(entry.ingredientId)?.name || entry.ingredientName || "Insumo eliminado")}</strong></td><td>${entry.delta > 0 ? "+" : ""}${decimal.format(entry.delta)} ${h(entry.unit || "")}</td><td>${decimal.format(entry.previousStock)} → ${decimal.format(entry.newStock)} ${h(entry.unit || "")}</td><td>${h(adjustmentLabels[entry.reason] || entry.reason)}${entry.note ? `<small class="muted history-note">${h(entry.note)}</small>` : ""}${entry.voidedAt ? `<small class="muted history-note">Anulado con la producción</small>` : ""}</td><td>${entry.delta > 0 ? money.format(entry.addedValue || 0) : "—"}${entry.costUnestimated ? `<small class="muted history-note">Sin estimar</small>` : ""}</td><td>${h(entry.actorEmail || "—")}</td></tr>`).join("")}</tbody></table></div>` : empty("Todavía no hay ajustes de stock.")}</article>`;
   app.querySelector("#new-ingredient")?.addEventListener("click", () => openIngredientDialog());
   app.querySelector("#empty-ingredient")?.addEventListener("click", () => openIngredientDialog());
   app.querySelectorAll("[data-edit-ingredient]").forEach((button) => button.addEventListener("click", () => openIngredientDialog(ingredientById(button.dataset.editIngredient))));
   app.querySelectorAll("[data-adjust-ingredient]").forEach((button) => button.addEventListener("click", () => openStockAdjustmentDialog(ingredientById(button.dataset.adjustIngredient))));
+  app.querySelectorAll("[data-delete-ingredient]").forEach((button) => button.addEventListener("click", () => deleteIngredient(button.dataset.deleteIngredient)));
+}
+
+function deleteIngredient(ingredientId) {
+  const ingredient = ingredientById(ingredientId);
+  if (!ingredient) return;
+  const used = state.purchases.some((item) => item.ingredientId === ingredientId)
+    || state.stockAdjustments.some((item) => item.ingredientId === ingredientId)
+    || state.products.some((item) => item.recipe.some((line) => line.ingredientId === ingredientId))
+    || state.productions.some((item) => item.requirementsSnapshot?.some((line) => line.ingredientId === ingredientId));
+  if (used || Number(ingredient.stock) > 0) return toast("No se puede eliminar: tiene stock, compras, ajustes, recetas o producciones asociadas.", 6000);
+  confirmAction("Eliminar insumo", `Se eliminará «${h(ingredient.name)}». Esta acción no se puede deshacer.`, "Eliminar insumo", () => {
+    state.ingredients = state.ingredients.filter((item) => item.id !== ingredientId);
+    persist("Insumo eliminado");
+  });
 }
 
 function openStockAdjustmentDialog(ingredient) {
@@ -253,31 +268,72 @@ function openIngredientDialog(existing = null) {
 }
 
 function renderPurchases() {
-  const purchases = [...state.purchases].sort((a, b) => b.date.localeCompare(a.date));
+  const purchases = state.purchases.filter((item) => !item.deletedAt).slice().reverse();
+  const changes = state.purchases.flatMap((item) => (item.history || []).map((change) => ({ ...change, purchaseId: item.id }))).sort((a, b) => b.at.localeCompare(a.at));
   app.innerHTML = pageHeading("Compras", "Cada compra actualiza el costo promedio y la existencia.", `<button class="primary" id="new-purchase" ${state.ingredients.length ? "" : "disabled"}>Registrar compra</button>`) + `
     ${!state.ingredients.length ? `<p class="warning">Antes de registrar una compra necesitás crear al menos un insumo.</p>` : ""}
-    <article class="card">${purchases.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Insumo</th><th>Cantidad</th><th>Total pagado</th></tr></thead><tbody>${purchases.map((purchase) => `<tr><td>${purchase.date}</td><td><strong>${h(ingredientById(purchase.ingredientId)?.name || "Insumo eliminado")}</strong></td><td>${decimal.format(purchase.quantity)} ${purchase.purchaseUnit}</td><td>${money.format(purchase.totalCost)}</td></tr>`).join("")}</tbody></table></div>` : empty("Las compras aparecerán aquí.")}</article>`;
+    <article class="card">${purchases.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Insumo</th><th>Cantidad</th><th>Total pagado</th><th></th></tr></thead><tbody>${purchases.map((purchase) => `<tr><td>${h(purchase.date)}</td><td><strong>${h(ingredientById(purchase.ingredientId)?.name || "Insumo eliminado")}</strong></td><td>${decimal.format(purchase.quantity)} ${h(purchase.purchaseUnit)}</td><td>${money.format(purchase.totalCost)}</td><td class="actions"><div class="row-actions"><button class="ghost compact-button" data-edit-purchase="${purchase.id}">Editar</button><button class="danger compact-button" data-delete-purchase="${purchase.id}">Eliminar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Las compras aparecerán aquí.")}</article>
+    <article class="card stock-history"><h3>Correcciones de compras</h3><p class="muted">Se conserva qué se cambió o eliminó y quién lo hizo. Los costos históricos de ventas y producciones no se modifican.</p>${changes.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Antes</th><th>Después</th><th>Registrado por</th></tr></thead><tbody>${changes.map((change) => `<tr><td>${h(change.at.slice(0, 10))}</td><td>${change.type === "delete" ? "Eliminada" : "Editada"}</td><td>${h(purchaseDescription(change.before))}</td><td>${change.after ? h(purchaseDescription(change.after)) : "—"}</td><td>${h(change.actorEmail || "—")}</td></tr>`).join("")}</tbody></table></div>` : empty("Todavía no hay compras corregidas.")}</article>`;
   app.querySelector("#new-purchase")?.addEventListener("click", openPurchaseDialog);
+  app.querySelectorAll("[data-edit-purchase]").forEach((button) => button.addEventListener("click", () => openPurchaseDialog(state.purchases.find((item) => item.id === button.dataset.editPurchase))));
+  app.querySelectorAll("[data-delete-purchase]").forEach((button) => button.addEventListener("click", () => deletePurchase(button.dataset.deletePurchase)));
 }
 
-function openPurchaseDialog() {
-  const modal = dialog(`<h2>Registrar compra</h2><p>Ingresá el total pagado; el costo unitario se calcula automáticamente.</p><form id="purchase-form"><div class="form-grid"><div class="field full"><label>Insumo</label><select name="ingredientId">${state.ingredients.map((item) => `<option value="${item.id}">${h(item.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.001" step="0.001" required></div><div class="field"><label>Unidad de compra</label><select name="purchaseUnit"></select></div><div class="field"><label>Total pagado ($)</label><input name="totalCost" type="number" min="0" step="0.01" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar compra</button></div></form>`);
+function purchaseSnapshot(purchase) {
+  return { ingredientId: purchase.ingredientId, quantity: purchase.quantity, purchaseUnit: purchase.purchaseUnit, baseQuantity: purchase.baseQuantity, totalCost: purchase.totalCost, date: purchase.date };
+}
+
+function purchaseDescription(purchase) {
+  const ingredient = ingredientById(purchase.ingredientId);
+  return `${purchase.date} · ${ingredient?.name || "Insumo eliminado"} · ${decimal.format(purchase.quantity)} ${purchase.purchaseUnit} · ${money.format(purchase.totalCost)}`;
+}
+
+function deletePurchase(purchaseId) {
+  const purchase = state.purchases.find((item) => item.id === purchaseId && !item.deletedAt);
+  if (!purchase) return;
+  let updatedIngredients;
+  try { updatedIngredients = correctPurchaseInventory(state.ingredients, purchase); }
+  catch (error) { return toast(error.message, 6000); }
+  confirmAction("Eliminar compra", `Se quitará la compra de ${h(ingredientById(purchase.ingredientId)?.name || "este insumo")} y se descontarán ${decimal.format(purchase.baseQuantity)} ${h(ingredientById(purchase.ingredientId)?.baseUnit || "unidades")} del stock actual. La corrección quedará en el historial.`, "Eliminar compra", () => {
+    state.ingredients = updatedIngredients;
+    purchase.history ??= [];
+    purchase.history.push({ type: "delete", before: purchaseSnapshot(purchase), after: null, at: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null });
+    purchase.deletedAt = new Date().toISOString();
+    persist("Compra eliminada y stock corregido");
+  });
+}
+
+function openPurchaseDialog(existing = null) {
+  const modal = dialog(`<h2>${existing ? "Editar compra" : "Registrar compra"}</h2><p>${existing ? "Al guardar se ajustarán el stock y el costo actuales. Los costos históricos no cambian." : "Ingresá el total pagado; el costo unitario se calcula automáticamente."}</p><form id="purchase-form"><div class="form-grid"><div class="field full"><label>Insumo</label><select name="ingredientId">${state.ingredients.map((item) => `<option value="${item.id}">${h(item.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.001" step="0.001" value="${existing?.quantity ?? ""}" required></div><div class="field"><label>Unidad de compra</label><select name="purchaseUnit"></select></div><div class="field"><label>Total pagado ($)</label><input name="totalCost" type="number" min="0" step="0.01" value="${existing?.totalCost ?? ""}" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${existing?.date || today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">${existing ? "Guardar cambios" : "Guardar compra"}</button></div></form>`);
   const form = modal.querySelector("form");
   const ingredientSelect = form.elements.ingredientId;
   const updateUnits = () => { const ingredient = ingredientById(ingredientSelect.value); form.elements.purchaseUnit.innerHTML = unitGroups[ingredient.baseUnit].map((unit) => `<option value="${unit.value}">${unit.label}</option>`).join(""); };
   ingredientSelect.addEventListener("change", updateUnits);
+  if (existing) ingredientSelect.value = existing.ingredientId;
   updateUnits();
+  if (existing) form.elements.purchaseUnit.value = existing.purchaseUnit;
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const ingredient = ingredientById(data.get("ingredientId"));
     const baseQuantity = toBaseQuantity(data.get("quantity"), data.get("purchaseUnit"), ingredient.baseUnit);
-    const updated = updateWeightedAverage(ingredient.stock, ingredient.averageCost, baseQuantity, data.get("totalCost"));
-    ingredient.stock = updated.stock;
-    ingredient.averageCost = updated.averageCost;
-    state.purchases.push({ id: uid("buy"), ingredientId: ingredient.id, quantity: Number(data.get("quantity")), purchaseUnit: data.get("purchaseUnit"), baseQuantity, totalCost: Number(data.get("totalCost")), date: data.get("date") });
+    const values = { ingredientId: ingredient.id, quantity: Number(data.get("quantity")), purchaseUnit: data.get("purchaseUnit"), baseQuantity, totalCost: Number(data.get("totalCost")), date: data.get("date") };
+    if (existing) {
+      let updatedIngredients;
+      try { updatedIngredients = correctPurchaseInventory(state.ingredients, existing, values); }
+      catch (error) { return toast(error.message, 6000); }
+      state.ingredients = updatedIngredients;
+      existing.history ??= [];
+      existing.history.push({ type: "edit", before: purchaseSnapshot(existing), after: values, at: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null });
+      Object.assign(existing, values);
+    } else {
+      const updated = updateWeightedAverage(ingredient.stock, ingredient.averageCost, baseQuantity, values.totalCost);
+      ingredient.stock = updated.stock;
+      ingredient.averageCost = updated.averageCost;
+      state.purchases.push({ id: uid("buy"), ...values, createdAt: new Date().toISOString(), history: [] });
+    }
     modal.close();
-    persist("Compra registrada y costo actualizado");
+    persist(existing ? "Compra corregida y stock actualizado" : "Compra registrada y costo actualizado");
   });
 }
 
@@ -324,7 +380,7 @@ function openProductDialog(existing = null) {
 }
 
 function renderProduction() {
-  const productions = [...state.productions].sort((a, b) => b.date.localeCompare(a.date));
+  const productions = [...state.productions].reverse();
   app.innerHTML = pageHeading("Producción", "Registrá cada elaboración y descontá sus insumos del inventario.", `<button class="primary" id="new-production" ${state.products.length ? "" : "disabled"}>Registrar producción</button>`) + `
     ${!state.products.length ? `<p class="warning">Necesitás un producto con receta antes de registrar una producción.</p>` : ""}
     <article class="card">${productions.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tandas</th><th>Unidades obtenidas</th><th>Costo total</th><th>Estado</th><th></th></tr></thead><tbody>${productions.map((production) => `<tr class="${production.voidedAt ? "voided-row" : ""}"><td>${production.date}</td><td><strong>${h(productById(production.productId)?.name || "Producto eliminado")}</strong></td><td>${decimal.format(production.batches)}</td><td>${decimal.format(production.producedQuantity)}</td><td>${money.format(production.totalCostSnapshot)}${production.costUnestimated ? `<small class="history-note muted">Costo parcial: aporte sin estimar</small>` : ""}</td><td>${production.voidedAt ? `<span class="status status-cancelado">Anulada</span>` : `<span class="status status-entregado">Registrada</span>`}</td><td class="actions">${production.voidedAt ? "" : `<button class="danger compact-button" data-void-production="${production.id}">Anular</button>`}</td></tr>`).join("")}</tbody></table></div>` : empty("Las elaboraciones registradas aparecerán aquí.")}</article>`;
@@ -389,11 +445,22 @@ function renderClients() {
   const clients = [...state.clients].sort((a, b) => a.name.localeCompare(b.name, "es"));
   app.innerHTML = pageHeading("Clientes", "Guardá sus datos una vez y reutilizalos en nuevos pedidos.", `<button class="primary" id="new-client">Nuevo cliente</button>`) + `
     <div class="client-grid">${clients.length ? clients.map((client) => {
-      const clientOrders = state.orders.filter((order) => order.clientId === client.id);
-      return `<article class="card client-card"><div class="card-title-row"><div class="client-avatar">${h(client.name.slice(0, 1).toUpperCase())}</div><button class="ghost compact-button" data-edit-client="${client.id}">Editar</button></div><h2>${h(client.name)}</h2>${client.phone ? `<a href="tel:${h(client.phone)}">${h(client.phone)}</a>` : `<span class="muted">Sin teléfono</span>`}${client.instagram ? `<p>${h(client.instagram)}</p>` : ""}<small class="muted">${clientOrders.length} pedido${clientOrders.length === 1 ? "" : "s"} registrado${clientOrders.length === 1 ? "" : "s"}</small></article>`;
+      const clientOrders = state.orders.filter((order) => !order.deletedAt && order.clientId === client.id);
+      return `<article class="card client-card"><div class="card-title-row"><div class="client-avatar">${h(client.name.slice(0, 1).toUpperCase())}</div><div class="row-actions"><button class="ghost compact-button" data-edit-client="${client.id}">Editar</button><button class="danger compact-button" data-delete-client="${client.id}">Eliminar</button></div></div><h2>${h(client.name)}</h2>${client.phone ? `<a href="tel:${h(client.phone)}">${h(client.phone)}</a>` : `<span class="muted">Sin teléfono</span>`}${client.instagram ? `<p>${h(client.instagram)}</p>` : ""}<small class="muted">${clientOrders.length} pedido${clientOrders.length === 1 ? "" : "s"} registrado${clientOrders.length === 1 ? "" : "s"}</small></article>`;
     }).join("") : `<article class="card" style="grid-column:1/-1">${empty("Todavía no hay clientes guardados.")}</article>`}</div>`;
   app.querySelector("#new-client")?.addEventListener("click", () => openClientDialog());
   app.querySelectorAll("[data-edit-client]").forEach((button) => button.addEventListener("click", () => openClientDialog(clientById(button.dataset.editClient))));
+  app.querySelectorAll("[data-delete-client]").forEach((button) => button.addEventListener("click", () => deleteClient(button.dataset.deleteClient)));
+}
+
+function deleteClient(clientId) {
+  const client = clientById(clientId);
+  if (!client) return;
+  confirmAction("Eliminar cliente", `Se eliminará «${h(client.name)}» del fichero. Sus pedidos conservarán el nombre y el teléfono anotados, pero dejarán de estar vinculados a este cliente.`, "Eliminar cliente", () => {
+    state.orders.filter((order) => order.clientId === clientId).forEach((order) => { order.clientId = null; });
+    state.clients = state.clients.filter((item) => item.id !== clientId);
+    persist("Cliente eliminado; pedidos conservados");
+  });
 }
 
 function openClientDialog(existing = null) {
@@ -410,7 +477,7 @@ function openClientDialog(existing = null) {
 }
 
 function renderAgenda() {
-  const active = state.orders.filter((order) => !["entregado", "cancelado"].includes(order.status)).sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate));
+  const active = state.orders.filter((order) => !order.deletedAt && !["entregado", "cancelado"].includes(order.status)).sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate));
   const grouped = active.reduce((days, order) => {
     (days[order.deliveryDate] ??= []).push(order);
     return days;
@@ -421,17 +488,29 @@ function renderAgenda() {
 }
 
 function renderOrders() {
-  const orders = [...state.orders].sort((a, b) => a.deliveryDate.localeCompare(b.deliveryDate));
+  const orders = state.orders.filter((order) => !order.deletedAt).slice().reverse();
   app.innerHTML = pageHeading("Pedidos", "Organizá encargos, señas, saldos y fechas de entrega.", `<button class="primary" id="new-order" ${state.products.length ? "" : "disabled"}>Nuevo pedido</button>`) + `
     ${!state.products.length ? `<p class="warning">Antes de tomar un pedido necesitás crear al menos un producto.</p>` : ""}
     ${orders.length ? `<div class="order-grid">${orders.map((order) => {
       const product = productById(order.productId);
       const balance = Math.max(order.totalPrice - order.deposit, 0);
-      return `<article class="card order-card"><div class="order-card-head"><div><span class="status status-${order.status}">${statusLabels[order.status]}</span><h2>${h(order.customerName)}</h2><p>${h(product?.name || "Producto eliminado")} · ${decimal.format(order.quantity)} unidad${order.quantity === 1 ? "" : "es"}</p></div><time>${order.deliveryDate}</time></div><div class="order-finance"><div><small>Total</small><strong>${money.format(order.totalPrice)}</strong></div><div><small>Seña</small><strong>${money.format(order.deposit)}</strong></div><div><small>Saldo</small><strong>${money.format(balance)}</strong></div></div>${order.notes ? `<p class="order-notes">${h(order.notes)}</p>` : ""}<div class="order-actions"><label>Estado <select data-order-status="${order.id}" ${order.status === "entregado" ? "disabled" : ""}>${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${order.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>${!["entregado", "cancelado"].includes(order.status) ? `<button class="ghost" data-edit-order="${order.id}">Editar</button>` : ""}</div>${order.saleId ? `<small class="sale-linked">✓ Venta registrada</small>` : ""}</article>`;
+      return `<article class="card order-card"><div class="order-card-head"><div><span class="status status-${order.status}">${statusLabels[order.status]}</span><h2>${h(order.customerName)}</h2><p>${h(product?.name || "Producto eliminado")} · ${decimal.format(order.quantity)} unidad${order.quantity === 1 ? "" : "es"}</p></div><time>${order.deliveryDate}</time></div><div class="order-finance"><div><small>Total</small><strong>${money.format(order.totalPrice)}</strong></div><div><small>Seña</small><strong>${money.format(order.deposit)}</strong></div><div><small>Saldo</small><strong>${money.format(balance)}</strong></div></div>${order.notes ? `<p class="order-notes">${h(order.notes)}</p>` : ""}<div class="order-actions"><label>Estado <select data-order-status="${order.id}" ${order.status === "entregado" ? "disabled" : ""}>${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${order.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>${!["entregado", "cancelado"].includes(order.status) ? `<button class="ghost" data-edit-order="${order.id}">Editar</button>` : ""}<button class="danger" data-delete-order="${order.id}">Eliminar</button></div>${order.saleId ? `<small class="sale-linked">✓ Venta registrada</small>` : ""}</article>`;
     }).join("")}</div>` : `<article class="card">${empty("Todavía no hay pedidos. Creá el primero para organizar la próxima entrega.")}</article>`}`;
   app.querySelector("#new-order")?.addEventListener("click", () => openOrderDialog());
   app.querySelectorAll("[data-edit-order]").forEach((button) => button.addEventListener("click", () => openOrderDialog(state.orders.find((order) => order.id === button.dataset.editOrder))));
+  app.querySelectorAll("[data-delete-order]").forEach((button) => button.addEventListener("click", () => deleteOrder(button.dataset.deleteOrder)));
   app.querySelectorAll("[data-order-status]").forEach((select) => select.addEventListener("change", () => updateOrderStatus(select.dataset.orderStatus, select.value)));
+}
+
+function deleteOrder(orderId) {
+  const order = state.orders.find((item) => item.id === orderId && !item.deletedAt);
+  if (!order) return;
+  const saleWarning = order.saleId ? " La venta ya registrada permanecerá en los informes." : "";
+  confirmAction("Eliminar pedido", `Se quitará el pedido de ${h(order.customerName)} de la lista y la agenda. No aparecerá como cancelado.${saleWarning}`, "Eliminar pedido", () => {
+    order.deletedAt = new Date().toISOString();
+    order.deletedBy = cloudSession?.user?.email || null;
+    persist("Pedido eliminado");
+  });
 }
 
 function openOrderDialog(existing = null) {

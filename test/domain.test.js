@@ -1,11 +1,41 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { countedStock, marginPercent, monthlySummary, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
+import { correctPurchaseInventory, countedStock, marginPercent, monthlySummary, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
 
 test("convierte kilogramos a gramos", () => assert.equal(toBaseQuantity(2.5, "kg", "g"), 2500));
 
 test("calcula el costo promedio ponderado", () => {
   assert.deepEqual(updateWeightedAverage(2000, 0.1, 3000, 450), { stock: 5000, averageCost: 0.13 });
+});
+
+test("corrige o elimina una compra sin alterar el objeto original", () => {
+  const ingredients = [{ id: "h", stock: 2000, averageCost: 0.1 }];
+  const purchase = { ingredientId: "h", baseQuantity: 1000, totalCost: 100 };
+  const edited = correctPurchaseInventory(ingredients, purchase, { ingredientId: "h", baseQuantity: 1500, totalCost: 180 });
+  assert.equal(edited[0].stock, 2500);
+  assert.equal(edited[0].averageCost, 0.112);
+  const deleted = correctPurchaseInventory(ingredients, purchase);
+  assert.equal(deleted[0].stock, 1000);
+  assert.equal(deleted[0].averageCost, 0.1);
+  assert.equal(ingredients[0].stock, 2000);
+});
+
+test("impide eliminar una compra cuyo stock ya se consumió", () => {
+  assert.throws(() => correctPurchaseInventory([{ id: "h", stock: 200, averageCost: 0.1 }], { ingredientId: "h", baseQuantity: 1000, totalCost: 100 }), /ya se consumió/);
+});
+
+test("impide una corrección que dejaría negativo el valor del inventario", () => {
+  assert.throws(() => correctPurchaseInventory([{ id: "h", stock: 1000, averageCost: 0.05 }], { ingredientId: "h", baseQuantity: 500, totalCost: 100 }), /valor actual del stock/);
+});
+
+test("permite corregir el insumo de una compra cuando ambos stocks quedan válidos", () => {
+  const result = correctPurchaseInventory(
+    [{ id: "h", stock: 1000, averageCost: 0.1 }, { id: "a", stock: 0, averageCost: 0 }],
+    { ingredientId: "h", baseQuantity: 1000, totalCost: 100 },
+    { ingredientId: "a", baseQuantity: 500, totalCost: 50 },
+  );
+  assert.deepEqual(result.map((item) => item.stock), [0, 500]);
+  assert.equal(result[1].averageCost, 0.1);
 });
 
 test("calcula una receta con gastos opcionales", () => {

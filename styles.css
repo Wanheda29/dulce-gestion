@@ -101,7 +101,7 @@ input:focus, select:focus { outline: 3px solid rgba(138,61,85,.14); border-color
 .requirement:last-child { border: 0; }
 .requirement.enough span:last-child { color: var(--green); }
 .requirement.missing span:last-child { color: #a33131; font-weight: 700; }
-.row-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.row-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .stock-history { margin-top: 18px; }
 .stock-history > p { margin-top: -5px; }
 .history-note { display: block; margin-top: 4px; white-space: normal; }
@@ -215,7 +215,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .responsive-table td.actions::before { display: none; }
   .responsive-table td.actions button { min-width: 96px; }
   .responsive-table td.actions .row-actions { width: 100%; }
-  .responsive-table td.actions .row-actions button { flex: 1; }
+  .responsive-table td.actions .row-actions button { flex: 1 1 96px; min-width: 0; }
   .requirement { flex-direction: column; gap: 3px; }
   dialog { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; }
   .dialog-body { max-height: 100dvh; padding: 24px 18px calc(28px + env(safe-area-inset-bottom)); }

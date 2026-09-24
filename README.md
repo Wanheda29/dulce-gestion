@@ -19,15 +19,16 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 ## Alcance de esta primera versión
 
 - Insumos con unidades base en gramos, mililitros o unidades.
-- Compras y costo promedio ponderado.
+- Compras y costo promedio ponderado. Las compras pueden corregirse o eliminarse con ajuste de stock e historial; si el stock o su valor quedarían negativos, la corrección se rechaza.
 - Ajustes manuales de stock con motivo e historial; aportes de insumos del hogar al registrar producciones sin stock suficiente.
 - Productos, recetas, rendimiento y precio de venta.
-- Edición segura de insumos, productos y recetas.
+- Edición segura de insumos, productos y recetas. Los insumos sin stock ni movimientos o referencias pueden eliminarse.
 - Registro de producciones por tanda con validación y descuento de materias primas.
 - Gastos opcionales: envases, mano de obra, gas, electricidad, reparto y otros.
 - Ventas con una fotografía del costo al momento de registrarlas.
-- Pedidos con cliente, teléfono opcional, fecha de entrega, seña, saldo, notas y estado.
-- Fichero de clientes reutilizable y agenda de entregas agrupada por fecha.
+- Pedidos con cliente, teléfono opcional, fecha de entrega, seña, saldo, notas y estado. Se muestran del más reciente al más antiguo; al eliminarlos salen de la vista y la agenda, pero sus ventas vinculadas permanecen.
+- Fichero de clientes reutilizable, con opción de eliminación sin borrar los pedidos registrados, y agenda de entregas agrupada por fecha.
+- Producciones mostradas del registro más reciente al más antiguo.
 - Anulación auditable de producciones con devolución exacta de insumos.
 - Respaldos versionados, restauración validada y compatibilidad con exportaciones anteriores.
 - Integración opcional con Supabase para login, sincronización y control del estado comercial.

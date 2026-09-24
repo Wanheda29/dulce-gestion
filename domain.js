@@ -29,6 +29,50 @@ export function updateWeightedAverage(currentStock, currentAverage, addedQuantit
   };
 }
 
+export function correctPurchaseInventory(ingredients, previousPurchase, replacement = null) {
+  const updated = ingredients.map((ingredient) => ({ ...ingredient }));
+  const previousIngredient = updated.find((item) => item.id === previousPurchase.ingredientId);
+  if (!previousIngredient) throw new Error("El insumo de la compra ya no existe.");
+  const nextIngredient = replacement && updated.find((item) => item.id === replacement.ingredientId);
+  if (replacement && !nextIngredient) throw new Error("El nuevo insumo no existe.");
+  const adjust = (ingredient, quantityDelta, valueDelta, fallbackAverage) => {
+    const oldStock = Number(ingredient.stock);
+    const oldAverage = Number(ingredient.averageCost || 0);
+    const newStock = oldStock + quantityDelta;
+    const newValue = oldStock * oldAverage + valueDelta;
+    if (![newStock, newValue].every(Number.isFinite) || newStock < -1e-9) {
+      throw new Error("No se puede corregir: parte de esa compra ya se consumió. Revisá el stock antes de modificarla.");
+    }
+    if (newStock > 1e-9 && newValue < -1e-9) {
+      throw new Error("No se puede corregir: el valor actual del stock quedaría negativo. Revisá los costos registrados.");
+    }
+    ingredient.stock = Math.max(0, newStock);
+    ingredient.averageCost = ingredient.stock > 0 ? Math.max(0, newValue / ingredient.stock) : fallbackAverage;
+  };
+  const oldQuantity = Number(previousPurchase.baseQuantity);
+  const oldValue = Number(previousPurchase.totalCost);
+  if (!Number.isFinite(oldQuantity) || oldQuantity <= 0 || !Number.isFinite(oldValue) || oldValue < 0) {
+    throw new Error("La compra anterior tiene cantidades o costos inválidos.");
+  }
+  if (replacement) {
+    const newQuantity = Number(replacement.baseQuantity);
+    const newValue = Number(replacement.totalCost);
+    if (!Number.isFinite(newQuantity) || newQuantity <= 0 || !Number.isFinite(newValue) || newValue < 0) {
+      throw new Error("La compra corregida necesita cantidad positiva y costo no negativo.");
+    }
+    if (replacement.ingredientId === previousPurchase.ingredientId) {
+      adjust(previousIngredient, newQuantity - oldQuantity, newValue - oldValue, newValue / newQuantity);
+    } else {
+      adjust(previousIngredient, -oldQuantity, -oldValue, Number(previousIngredient.averageCost || 0));
+      const added = updateWeightedAverage(nextIngredient.stock, nextIngredient.averageCost, newQuantity, newValue);
+      Object.assign(nextIngredient, added);
+    }
+  } else {
+    adjust(previousIngredient, -oldQuantity, -oldValue, Number(previousIngredient.averageCost || 0));
+  }
+  return updated;
+}
+
 export function countedStock(ingredient, actualStock, addedValue = 0) {
   const previousStock = Number(ingredient.stock);
   const newStock = Number(actualStock);
