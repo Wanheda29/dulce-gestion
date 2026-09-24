@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#8a3d55" />
+    <meta name="description" content="Gestión simple de costos, recetas y ventas para pastelería." />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Dulce Gestión</title>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <button id="close-menu" class="sidebar-close" type="button" aria-label="Cerrar menú">×</button>
+        <a class="brand" href="#inicio" aria-label="Ir al inicio">
+          <span class="brand-mark">DG</span>
+          <span><strong>Dulce Gestión</strong><small>Costos sin vueltas</small></span>
+        </a>
+        <nav aria-label="Navegación principal">
+          <a href="#inicio" data-page="inicio">Resumen</a>
+          <a href="#insumos" data-page="insumos">Insumos</a>
+          <a href="#compras" data-page="compras">Compras</a>
+          <a href="#productos" data-page="productos">Productos y recetas</a>
+          <a href="#produccion" data-page="produccion">Producción</a>
+          <a href="#clientes" data-page="clientes">Clientes</a>
+          <a href="#pedidos" data-page="pedidos">Pedidos</a>
+          <a href="#agenda" data-page="agenda">Agenda</a>
+          <a href="#ventas" data-page="ventas">Ventas</a>
+          <a href="#informes" data-page="informes">Informes</a>
+          <a href="#datos" data-page="datos">Datos y respaldos</a>
+          <a href="#cuenta" data-page="cuenta">Cuenta</a>
+        </nav>
+        <button id="data-button" class="ghost sidebar-action">Proteger mis datos</button>
+      </aside>
+      <button id="nav-backdrop" class="nav-backdrop" type="button" aria-label="Cerrar menú" hidden></button>
+
+      <main>
+        <header class="topbar">
+          <button id="menu-button" class="icon-button" aria-label="Abrir menú">☰</button>
+          <div><p class="eyebrow">Pastelería por encargo</p><h1 id="page-title">Resumen</h1></div>
+          <div class="today" id="today"></div>
+        </header>
+        <section id="app" class="content" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "Dulce Gestión",
+  "short_name": "DulceGestión",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fffaf7",
+  "theme_color": "#8a3d55",
+  "description": "Costos, recetas y ventas para una pastelería por encargo."
+}
