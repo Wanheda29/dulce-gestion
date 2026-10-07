@@ -44,3 +44,11 @@ test("el respaldo conserva el historial de ajustes", () => {
   const restored = parseBackup(JSON.stringify(createBackup(data)));
   assert.equal(restored.data.stockAdjustments[0].reason, "family");
 });
+
+test("el respaldo conserva costos manuales y su historial", () => {
+  const data = sample();
+  data.ingredients[0].averageCost = 0.055;
+  data.ingredients[0].costHistory = [{ previousCost: 0, newCost: 0.055, amount: 55, costUnit: "kg", createdAt: "2026-10-07T12:00:00Z", actorEmail: null }];
+  const restored = parseBackup(JSON.stringify(createBackup(data)));
+  assert.deepEqual(restored.data.ingredients[0], data.ingredients[0]);
+});

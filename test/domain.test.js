@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { correctPurchaseInventory, countedStock, customerKey, deleteProductionRecord, marginPercent, monthlySummary, pagedOrders, productionCostBreakdown, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
+import { correctPurchaseInventory, countedStock, customerKey, deleteProductionRecord, ingredientWithManualCost, marginPercent, monthlySummary, pagedOrders, productionCostBreakdown, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName, saleFromOrder, toBaseQuantity, updateWeightedAverage } from "../domain.js";
 
 test("convierte kilogramos a gramos", () => assert.equal(toBaseQuantity(2.5, "kg", "g"), 2500));
 
@@ -159,4 +159,35 @@ test("un aporte sin valor conocido permite producir pero se marca como costo par
   assert.equal(result.plan.canProduce, true);
   assert.equal(result.costUnestimated, true);
   assert.equal(result.adjustments[0].delta, 100);
+});
+
+test("edita costos por kg, litro y unidad sin modificar stock ni el insumo original", () => {
+  for (const [baseUnit, costUnit, amount, expected] of [["g", "kg", 55, 0.055], ["ml", "l", 80, 0.08], ["unidad", "unidad", 12.5, 12.5], ["g", "g", 0.075, 0.075]]) {
+    const original = { id: "h", baseUnit, stock: 500, averageCost: 0.1 };
+    const updated = ingredientWithManualCost(original, amount, costUnit);
+    assert.equal(updated.averageCost, expected);
+    assert.equal(updated.stock, 500);
+    assert.equal(original.averageCost, 0.1);
+  }
+  assert.equal(ingredientWithManualCost({ baseUnit: "g", stock: 0 }, 0, "kg").averageCost, 0);
+});
+
+test("rechaza costos manuales inválidos y unidades incompatibles", () => {
+  const ingredient = { baseUnit: "g", stock: 100, averageCost: 0.1 };
+  for (const amount of [-1, NaN, Infinity, "", " ", null, undefined, "abc"]) {
+    assert.throws(() => ingredientWithManualCost(ingredient, amount, "kg"), /costo válido/);
+  }
+  assert.throws(() => ingredientWithManualCost(ingredient, 55, "l"), /no es compatible/);
+});
+
+test("el costo manual se usa en recetas y compras futuras y conserva los registros históricos", () => {
+  const original = { id: "h", baseUnit: "g", stock: 1000, averageCost: 0.1 };
+  const product = { yieldQuantity: 1, recipe: [{ ingredientId: "h", quantity: 500 }] };
+  const historicalSale = saleFromOrder({ quantity: 1, totalPrice: 100 }, { ...product, id: "p" }, [original], "2026-10-07", "s");
+  const historicalProduction = productionPlan(product, [original], 1);
+  const updated = ingredientWithManualCost(original, 200, "kg");
+  assert.equal(recipeCost(product, [updated]).unitCost, 100);
+  assert.equal(historicalSale.unitCostSnapshot, 50);
+  assert.equal(historicalProduction.totalCost, 50);
+  assert.deepEqual(updateWeightedAverage(updated.stock, updated.averageCost, 1000, 100), { stock: 2000, averageCost: 0.15 });
 });

@@ -29,6 +29,16 @@ export function updateWeightedAverage(currentStock, currentAverage, addedQuantit
   };
 }
 
+export function ingredientWithManualCost(ingredient, amount, costUnit) {
+  if (amount === null || amount === undefined || String(amount).trim() === "") {
+    throw new Error("Ingresá un costo válido, mayor o igual a cero.");
+  }
+  const cost = Number(amount);
+  if (!Number.isFinite(cost) || cost < 0) throw new Error("Ingresá un costo válido, mayor o igual a cero.");
+  const quantity = toBaseQuantity(1, costUnit, ingredient.baseUnit);
+  return { ...ingredient, averageCost: cost / quantity };
+}
+
 export function correctPurchaseInventory(ingredients, previousPurchase, replacement = null) {
   const updated = ingredients.map((ingredient) => ({ ...ingredient }));
   const previousIngredient = updated.find((item) => item.id === previousPurchase.ingredientId);

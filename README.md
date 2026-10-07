@@ -19,6 +19,7 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 ## Alcance de esta primera versión
 
 - Insumos con unidades base en gramos, mililitros o unidades.
+- Edición manual del costo desde Insumos, por gramo/kilogramo, mililitro/litro o unidad, sin registrar compras ni cambiar la existencia. Actualiza el valor del stock y las recetas; las ventas y producciones históricas conservan sus costos. Los cambios quedan guardados en el respaldo del insumo.
 - Compras y costo promedio ponderado. Las compras pueden corregirse o eliminarse con ajuste de stock e historial; si el stock o su valor quedarían negativos, la corrección se rechaza.
 - Ajustes manuales de stock con motivo e historial; aportes de insumos del hogar al registrar producciones sin stock suficiente.
 - Productos, recetas, rendimiento y precio de venta.
