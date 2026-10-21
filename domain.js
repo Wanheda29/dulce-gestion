@@ -1,4 +1,8 @@
 export const unitGroups = {
+  kg: [
+    { value: "g", label: "gramos", factor: 0.001 },
+    { value: "kg", label: "kilogramos", factor: 1 },
+  ],
   g: [
     { value: "g", label: "gramos", factor: 1 },
     { value: "kg", label: "kilogramos", factor: 1000 },
@@ -14,6 +18,36 @@ export function toBaseQuantity(quantity, purchaseUnit, baseUnit) {
   const option = unitGroups[baseUnit]?.find((unit) => unit.value === purchaseUnit);
   if (!option) throw new Error("La unidad elegida no es compatible con el insumo.");
   return Number(quantity) * option.factor;
+}
+
+export const ingredientUnit = (ingredient) => ingredient.displayUnit || ingredient.baseUnit;
+
+export function ingredientQuantity(ingredient, quantity) {
+  return Number(quantity) / toBaseQuantity(1, ingredientUnit(ingredient), ingredient.baseUnit);
+}
+
+export function ingredientUnitCost(ingredient) {
+  return Number(ingredient.averageCost || 0) * toBaseQuantity(1, ingredientUnit(ingredient), ingredient.baseUnit);
+}
+
+export function recipeLineQuantity(line, ingredient) {
+  if (!line.unit) return Number(line.quantity || 0);
+  return toBaseQuantity(line.quantity || 0, line.unit, ingredient.baseUnit);
+}
+
+export function deleteProductRecord(product, orders, deletedAt, deletedBy = null) {
+  if (!product || product.deletedAt) throw new Error("La receta ya fue eliminada.");
+  if (orders.some((order) => order.productId === product.id && !order.deletedAt && !["entregado", "cancelado"].includes(order.status))) {
+    throw new Error("No se puede eliminar: tiene pedidos pendientes. Completalos o cancelalos primero.");
+  }
+  return { ...product, deletedAt, deletedBy };
+}
+
+export function profitOnCostPercent(price, cost) {
+  const numericCost = Number(cost);
+  const numericPrice = Number(price);
+  if (!Number.isFinite(numericCost) || numericCost <= 0 || !Number.isFinite(numericPrice) || numericPrice < 0) return null;
+  return ((numericPrice - numericCost) / numericCost) * 100;
 }
 
 export function updateWeightedAverage(currentStock, currentAverage, addedQuantity, totalCost) {
@@ -150,7 +184,7 @@ export function deleteProductionRecord(ingredients, adjustments, production, del
 export function recipeCost(product, ingredients) {
   const ingredientCost = (product.recipe ?? []).reduce((total, line) => {
     const ingredient = ingredients.find((item) => item.id === line.ingredientId);
-    return total + Number(line.quantity || 0) * Number(ingredient?.averageCost || 0);
+    return total + (ingredient ? recipeLineQuantity(line, ingredient) * Number(ingredient.averageCost || 0) : 0);
   }, 0);
   const optionalCost = Object.values(product.optionalCosts ?? {}).reduce(
     (total, value) => total + Number(value || 0),
@@ -224,7 +258,9 @@ export function productionPlan(product, ingredients, batches = 1) {
   if (!product || batchCount <= 0) throw new Error("La cantidad de tandas debe ser positiva.");
   const totals = new Map();
   for (const line of product.recipe ?? []) {
-    totals.set(line.ingredientId, (totals.get(line.ingredientId) || 0) + Number(line.quantity) * batchCount);
+    const ingredient = ingredients.find((item) => item.id === line.ingredientId);
+    if (!ingredient) throw new Error("La receta contiene un insumo que ya no existe.");
+    totals.set(line.ingredientId, (totals.get(line.ingredientId) || 0) + recipeLineQuantity(line, ingredient) * batchCount);
   }
   const requirements = [...totals].map(([ingredientId, required]) => {
     const ingredient = ingredients.find((item) => item.id === ingredientId);

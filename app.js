@@ -1,4 +1,4 @@
-import { correctPurchaseInventory, countedStock, customerKey, deleteProductionRecord, ingredientWithManualCost, marginPercent, monthlySummary, pagedOrders, productionCostBreakdown, productionPlan, productionWithHomeSupply, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
+import { correctPurchaseInventory, countedStock, customerKey, deleteProductRecord, deleteProductionRecord, ingredientQuantity, ingredientUnit, ingredientUnitCost, ingredientWithManualCost, monthlySummary, pagedOrders, productionCostBreakdown, productionPlan, productionWithHomeSupply, profitOnCostPercent, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
@@ -47,6 +47,7 @@ const today = () => {
 const currentMonth = () => today().slice(0, 7);
 const ingredientById = (id) => state.ingredients.find((item) => item.id === id);
 const productById = (id) => state.products.find((item) => item.id === id);
+const activeProducts = () => state.products.filter((item) => !item.deletedAt);
 const clientById = (id) => state.clients.find((item) => item.id === id);
 const saleCustomerName = (sale) => resolveSaleCustomerName(sale, state.orders);
 const customerOptions = (names, selected) => [...new Map(names.filter(Boolean).map((name) => [customerKey(name), name.trim()])).entries()]
@@ -208,7 +209,7 @@ function renderDashboard() {
 function renderIngredients() {
   const adjustments = [...state.stockAdjustments].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   app.innerHTML = pageHeading("Insumos", "Editá los costos y corregí la existencia; también podés registrar compras.", `<button class="primary" id="new-ingredient">Nuevo insumo</button>`) + `
-    <article class="card">${state.ingredients.length ? `<div class="table-wrap"><table><thead><tr><th>Insumo</th><th>Existencia</th><th>Costo por unidad</th><th>Valor en stock</th><th></th></tr></thead><tbody>${state.ingredients.map((item) => `<tr><td><strong>${h(item.name)}</strong></td><td>${decimal.format(item.stock)} ${item.baseUnit}</td><td>${ingredientMoney.format(item.averageCost)} / ${item.baseUnit}</td><td>${money.format(item.stock * item.averageCost)}</td><td class="actions"><div class="row-actions"><button class="ghost compact-button" data-cost-ingredient="${item.id}">Editar costo</button><button class="ghost compact-button" data-adjust-ingredient="${item.id}">Ajustar stock</button><button class="ghost compact-button" data-edit-ingredient="${item.id}">Editar</button><button class="danger compact-button" data-delete-ingredient="${item.id}">Eliminar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Creá harina, azúcar, huevos o cualquier materia prima.", `<button class="primary" id="empty-ingredient">Crear primer insumo</button>`)}</article>
+    <article class="card">${state.ingredients.length ? `<div class="table-wrap"><table><thead><tr><th>Insumo</th><th>Existencia</th><th>Costo por unidad</th><th>Valor en stock</th><th></th></tr></thead><tbody>${state.ingredients.map((item) => `<tr><td><strong>${h(item.name)}</strong></td><td>${decimal.format(ingredientQuantity(item, item.stock))} ${ingredientUnit(item)}</td><td>${ingredientMoney.format(ingredientUnitCost(item))} / ${ingredientUnit(item)}</td><td>${money.format(item.stock * item.averageCost)}</td><td class="actions"><div class="row-actions"><button class="ghost compact-button" data-cost-ingredient="${item.id}">Editar costo</button><button class="ghost compact-button" data-adjust-ingredient="${item.id}">Ajustar stock</button><button class="ghost compact-button" data-edit-ingredient="${item.id}">Editar</button><button class="danger compact-button" data-delete-ingredient="${item.id}">Eliminar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Creá harina, azúcar, huevos o cualquier materia prima.", `<button class="primary" id="empty-ingredient">Crear primer insumo</button>`)}</article>
     <article class="card stock-history"><h3>Historial de ajustes</h3><p class="muted">Los cambios manuales y los aportes desde casa quedan registrados aquí. Las compras se consultan en Compras.</p>${adjustments.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Insumo</th><th>Cambio</th><th>Existencia</th><th>Motivo</th><th>Valor agregado</th><th>Registrado por</th></tr></thead><tbody>${adjustments.map((entry) => `<tr><td>${h(entry.date || entry.createdAt?.slice(0, 10) || "")}</td><td><strong>${h(ingredientById(entry.ingredientId)?.name || entry.ingredientName || "Insumo eliminado")}</strong></td><td>${entry.delta > 0 ? "+" : ""}${decimal.format(entry.delta)} ${h(entry.unit || "")}</td><td>${decimal.format(entry.previousStock)} → ${decimal.format(entry.newStock)} ${h(entry.unit || "")}</td><td>${h(adjustmentLabels[entry.reason] || entry.reason)}${entry.note ? `<small class="muted history-note">${h(entry.note)}</small>` : ""}${entry.voidedAt ? `<small class="muted history-note">Anulado con la producción</small>` : ""}</td><td>${entry.delta > 0 ? money.format(entry.addedValue || 0) : "—"}${entry.costUnestimated ? `<small class="muted history-note">Sin estimar</small>` : ""}</td><td>${h(entry.actorEmail || "—")}</td></tr>`).join("")}</tbody></table></div>` : empty("Todavía no hay ajustes de stock.")}</article>`;
   app.querySelector("#new-ingredient")?.addEventListener("click", () => openIngredientDialog());
   app.querySelector("#empty-ingredient")?.addEventListener("click", () => openIngredientDialog());
@@ -233,7 +234,7 @@ function deleteIngredient(ingredientId) {
 }
 
 function openStockAdjustmentDialog(ingredient) {
-  const modal = dialog(`<h2>Ajustar stock</h2><p>${h(ingredient.name)}: el sistema registra ${decimal.format(ingredient.stock)} ${h(ingredient.baseUnit)}. Indicá cuánto hay realmente; el cambio quedará en el historial.</p><form id="stock-adjustment-form"><div class="form-grid"><div class="field"><label>Existencia real (${h(ingredient.baseUnit)})</label><input name="actualStock" type="number" min="0" step="0.001" value="${ingredient.stock}" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><label>Motivo</label><select name="reason"><option value="correction">Corrección de inventario</option><option value="family">Uso familiar</option><option value="home">Insumos de casa</option></select></div><div class="field full"><label>Nota (opcional)</label><input name="note" maxlength="200" placeholder="Ej. Usaron harina para cocinar en casa"></div><div class="field full" id="added-value-field" hidden><label>Valor estimado del aumento ($)</label><input name="addedValue" type="number" min="0" step="0.01"><small class="muted">No se registra como compra. Si no conocés el valor, podés dejarlo en cero y figurará como sin estimar.</small></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar ajuste</button></div></form>`);
+  const modal = dialog(`<h2>Ajustar stock</h2><p>${h(ingredient.name)}: el sistema registra ${decimal.format(ingredientQuantity(ingredient, ingredient.stock))} ${h(ingredientUnit(ingredient))}. Indicá cuánto hay realmente; el cambio quedará en el historial.</p><form id="stock-adjustment-form"><div class="form-grid"><div class="field"><label>Existencia real (${h(ingredientUnit(ingredient))})</label><input name="actualStock" type="number" min="0" step="any" value="${ingredientQuantity(ingredient, ingredient.stock)}" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><label>Motivo</label><select name="reason"><option value="correction">Corrección de inventario</option><option value="family">Uso familiar</option><option value="home">Insumos de casa</option></select></div><div class="field full"><label>Nota (opcional)</label><input name="note" maxlength="200" placeholder="Ej. Usaron harina para cocinar en casa"></div><div class="field full" id="added-value-field" hidden><label>Valor estimado del aumento ($)</label><input name="addedValue" type="number" min="0" step="0.01"><small class="muted">No se registra como compra. Si no conocés el valor, podés dejarlo en cero y figurará como sin estimar.</small></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar ajuste</button></div></form>`);
   const form = modal.querySelector("form");
   const valueField = form.querySelector("#added-value-field");
   let valueEdited = false;
@@ -241,7 +242,7 @@ function openStockAdjustmentDialog(ingredient) {
   form.elements.addedValue.addEventListener("input", () => { valueEdited = true; });
   form.elements.reason.addEventListener("change", () => { reasonEdited = true; });
   form.elements.actualStock.addEventListener("input", () => {
-    const delta = Number(form.elements.actualStock.value) - Number(ingredient.stock);
+    const delta = toBaseQuantity(form.elements.actualStock.value, ingredientUnit(ingredient), ingredient.baseUnit) - Number(ingredient.stock);
     valueField.hidden = !(delta > 0);
     if (delta > 0 && !valueEdited) form.elements.addedValue.value = (delta * Number(ingredient.averageCost || 0)).toFixed(2);
     if (!reasonEdited) form.elements.reason.value = delta > 0 ? "home" : delta < 0 ? "family" : "correction";
@@ -249,7 +250,7 @@ function openStockAdjustmentDialog(ingredient) {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     try {
-      const actualStock = Number(form.elements.actualStock.value);
+      const actualStock = toBaseQuantity(form.elements.actualStock.value, ingredientUnit(ingredient), ingredient.baseUnit);
       const counted = countedStock(ingredient, actualStock, Number(form.elements.addedValue.value || 0));
       if (!counted.delta) return toast("La existencia no cambió");
       state.stockAdjustments.push({ id: uid("adj"), ingredientId: ingredient.id, ingredientName: ingredient.name, unit: ingredient.baseUnit, previousStock: counted.previousStock, newStock: counted.stock, delta: counted.delta, addedValue: counted.addedValue, costUnestimated: counted.delta > 0 && counted.addedValue === 0, reason: form.elements.reason.value, note: form.elements.note.value.trim(), date: form.elements.date.value, createdAt: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null, sourceProductionId: null });
@@ -263,7 +264,7 @@ function openStockAdjustmentDialog(ingredient) {
 
 function openIngredientCostDialog(ingredient) {
   const units = unitGroups[ingredient.baseUnit];
-  const initialUnit = units.at(-1);
+  const initialUnit = units.find((unit) => unit.value === ingredient.displayUnit) || units.at(-1);
   const initialCost = Number(ingredient.averageCost || 0) * initialUnit.factor;
   const modal = dialog(`<h2>Editar costo</h2><p><strong>${h(ingredient.name)}</strong>: indicá el costo de referencia para calcular las recetas y valorar el stock actual. Las ventas y producciones ya registradas conservan sus costos históricos.</p><form id="ingredient-cost-form"><div class="form-grid"><div class="field"><label for="ingredient-cost">Costo ($)</label><input id="ingredient-cost" name="cost" type="number" min="0" step="any" value="${initialCost}" required></div><div class="field"><label for="ingredient-cost-unit">Por cada</label><select id="ingredient-cost-unit" name="costUnit">${units.map((unit) => `<option value="${unit.value}" ${unit.value === initialUnit.value ? "selected" : ""}>${{ g: "gramo", kg: "kilogramo", ml: "mililitro", l: "litro", unidad: "unidad" }[unit.value]}</option>`).join("")}</select></div><div class="field full"><small class="muted">Este cambio no registra una compra ni modifica la cantidad disponible. Las próximas compras volverán a calcular el costo promedio.</small></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar costo</button></div></form>`);
   const form = modal.querySelector("form");
@@ -279,7 +280,7 @@ function openIngredientCostDialog(ingredient) {
     event.preventDefault();
     try {
       const updated = ingredientWithManualCost(ingredient, form.elements.cost.value, form.elements.costUnit.value);
-      if (updated.averageCost === Number(ingredient.averageCost || 0)) {
+      if (updated.averageCost === Number(ingredient.averageCost || 0) && ingredientUnit(ingredient) === form.elements.costUnit.value) {
         modal.close();
         return toast("El costo no cambió");
       }
@@ -290,6 +291,7 @@ function openIngredientCostDialog(ingredient) {
         createdAt: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null,
       }];
       ingredient.averageCost = updated.averageCost;
+      ingredient.displayUnit = form.elements.costUnit.value;
       modal.close();
       persist("Costo del insumo actualizado");
     } catch (error) { toast(error.message); }
@@ -297,14 +299,16 @@ function openIngredientCostDialog(ingredient) {
 }
 
 function openIngredientDialog(existing = null) {
-  const unitLocked = existing && (Number(existing.averageCost || 0) > 0 || existing.costHistory?.length || state.purchases.some((purchase) => purchase.ingredientId === existing.id) || state.products.some((product) => product.recipe.some((line) => line.ingredientId === existing.id)));
-  const modal = dialog(`<h2>${existing ? "Editar insumo" : "Nuevo insumo"}</h2><p>La unidad base se usa para comparar compras y calcular recetas.</p><form id="ingredient-form"><div class="form-grid"><div class="field full"><label>Nombre</label><input name="name" required value="${h(existing?.name || "")}" placeholder="Ej. Harina 0000"></div><div class="field full"><label>Unidad base</label><select name="baseUnit" ${unitLocked ? "disabled" : ""}><option value="g" ${existing?.baseUnit === "g" ? "selected" : ""}>Gramos</option><option value="ml" ${existing?.baseUnit === "ml" ? "selected" : ""}>Mililitros</option><option value="unidad" ${existing?.baseUnit === "unidad" ? "selected" : ""}>Unidades</option></select>${unitLocked ? `<small class="muted">No se puede cambiar porque ya tiene costos, movimientos o recetas.</small>` : ""}</div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar insumo</button></div></form>`);
+  const unitLocked = existing && (Number(existing.stock || 0) > 0 || Number(existing.averageCost || 0) > 0 || existing.costHistory?.length || state.stockAdjustments.some((entry) => entry.ingredientId === existing.id) || state.purchases.some((purchase) => purchase.ingredientId === existing.id) || state.products.some((product) => product.recipe.some((line) => line.ingredientId === existing.id)));
+  const options = [{ value: "g", label: "Gramos" }, { value: "kg", label: "Kilogramos" }, { value: "ml", label: "Mililitros" }, { value: "unidad", label: "Unidades" }].filter((unit) => !unitLocked || unitGroups[existing.baseUnit].some((option) => option.value === unit.value));
+  const modal = dialog(`<h2>${existing ? "Editar insumo" : "Nuevo insumo"}</h2><p>Elegí la unidad en la que querés ver la existencia y el costo del insumo.</p><form id="ingredient-form"><div class="form-grid"><div class="field full"><label>Nombre</label><input name="name" required value="${h(existing?.name || "")}" placeholder="Ej. Harina 0000"></div><div class="field full"><label for="ingredient-unit">Unidad del insumo</label><select id="ingredient-unit" name="baseUnit">${options.map((unit) => `<option value="${unit.value}" ${unit.value === (existing ? ingredientUnit(existing) : "g") ? "selected" : ""}>${unit.label}</option>`).join("")}</select>${unitLocked ? `<small class="muted">Las unidades compatibles se convierten automáticamente. Las recetas y los movimientos anteriores conservan sus cantidades.</small>` : ""}</div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar insumo</button></div></form>`);
   modal.querySelector("form").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     if (existing) {
       existing.name = data.get("name").trim();
-      if (!unitLocked) existing.baseUnit = data.get("baseUnit");
+      if (unitLocked) existing.displayUnit = data.get("baseUnit");
+      else { existing.baseUnit = data.get("baseUnit"); delete existing.displayUnit; }
     } else state.ingredients.push({ id: uid("ing"), name: data.get("name").trim(), baseUnit: data.get("baseUnit"), stock: 0, averageCost: 0 });
     modal.close();
     persist(existing ? "Insumo actualizado" : "Insumo creado");
@@ -382,15 +386,29 @@ function openPurchaseDialog(existing = null) {
 }
 
 function renderProducts() {
+  const products = activeProducts();
   app.innerHTML = pageHeading("Productos y recetas", "El costo se recalcula con los precios actuales de los insumos.", `<button class="primary" id="new-product" ${state.ingredients.length ? "" : "disabled"}>Nuevo producto</button>`) + `
     ${!state.ingredients.length ? `<p class="warning">Creá al menos un insumo antes de armar una receta.</p>` : ""}
-    <div class="grid-2">${state.products.length ? state.products.map((product) => { const cost = recipeCost(product, state.ingredients); return `<article class="card"><div class="card-title-row"><span class="pill">${h(product.category || "Producto")}</span><button class="ghost compact-button" data-edit-product="${product.id}">Editar</button></div><h2>${h(product.name)}</h2><p class="muted">La receta rinde ${decimal.format(product.yieldQuantity)} ${product.yieldQuantity === 1 ? "unidad" : "unidades"}.</p><div class="stats" style="grid-template-columns:1fr 1fr"><div><small class="muted">Costo unitario</small><br><strong>${money.format(cost.unitCost)}</strong></div><div><small class="muted">Precio de venta</small><br><strong>${money.format(product.salePrice)}</strong></div></div><p>Margen estimado: <strong>${decimal.format(marginPercent(product.salePrice, cost.unitCost))}%</strong></p></article>`; }).join("") : `<article class="card" style="grid-column:1/-1">${empty("Todavía no hay productos ni recetas.")}</article>`}</div>`;
+    <div class="grid-2">${products.length ? products.map((product) => { const cost = recipeCost(product, state.ingredients); const profitPercent = profitOnCostPercent(product.salePrice, cost.unitCost); return `<article class="card"><div class="card-title-row"><span class="pill">${h(product.category || "Producto")}</span><div class="row-actions"><button class="ghost compact-button" data-edit-product="${product.id}">Editar</button><button class="danger compact-button" data-delete-product="${product.id}">Eliminar receta</button></div></div><h2>${h(product.name)}</h2><p class="muted">La receta rinde ${decimal.format(product.yieldQuantity)} ${product.yieldQuantity === 1 ? "unidad" : "unidades"}.</p><div class="stats" style="grid-template-columns:1fr 1fr"><div><small class="muted">Costo unitario</small><br><strong>${money.format(cost.unitCost)}</strong></div><div><small class="muted">Precio de venta</small><br><strong>${money.format(product.salePrice)}</strong></div></div><p>Ganancia sobre costo: <strong>${profitPercent === null ? "Sin costo definido" : `${decimal.format(profitPercent)}%`}</strong></p></article>`; }).join("") : `<article class="card" style="grid-column:1/-1">${empty("Todavía no hay productos ni recetas.")}</article>`}</div>`;
   app.querySelector("#new-product")?.addEventListener("click", () => openProductDialog());
   app.querySelectorAll("[data-edit-product]").forEach((button) => button.addEventListener("click", () => openProductDialog(productById(button.dataset.editProduct))));
+  app.querySelectorAll("[data-delete-product]").forEach((button) => button.addEventListener("click", () => deleteProduct(button.dataset.deleteProduct)));
+}
+
+function deleteProduct(productId) {
+  const product = productById(productId);
+  try { deleteProductRecord(product, state.orders, new Date().toISOString()); }
+  catch (error) { return toast(error.message, 6000); }
+  confirmAction("Eliminar receta", "Se quitará «" + h(product.name) + "» de Productos y recetas y de las opciones para nuevos registros. Las ventas, producciones e informes anteriores se conservan.", "Eliminar receta", () => {
+    try {
+      Object.assign(product, deleteProductRecord(product, state.orders, new Date().toISOString(), cloudSession?.user?.email || null));
+      persist("Receta eliminada");
+    } catch (error) { toast(error.message, 6000); }
+  });
 }
 
 function ingredientOptions() {
-  return state.ingredients.map((item) => `<option value="${item.id}">${h(item.name)} (${item.baseUnit})</option>`).join("");
+  return state.ingredients.map((item) => `<option value="${item.id}">${h(item.name)} (${ingredientUnit(item)})</option>`).join("");
 }
 
 function openProductDialog(existing = null) {
@@ -400,13 +418,34 @@ function openProductDialog(existing = null) {
   const addLine = (line = null) => {
     const row = document.createElement("div");
     row.className = "recipe-line";
-    row.innerHTML = `<div class="field"><select class="line-ingredient" aria-label="Ingrediente">${ingredientOptions()}</select></div><div class="field"><input class="line-quantity" type="number" min="0.001" step="0.001" value="${line?.quantity || ""}" placeholder="Cantidad" aria-label="Cantidad de ingrediente" required></div><button type="button" aria-label="Quitar ingrediente">×</button>`;
-    if (line) row.querySelector("select").value = line.ingredientId;
+    row.innerHTML = `<div class="field"><select class="line-ingredient" aria-label="Ingrediente">${ingredientOptions()}</select></div><div class="field"><input class="line-quantity" type="number" min="0.000001" step="any" value="${line?.quantity || ""}" placeholder="Cantidad" aria-label="Cantidad de ingrediente" required></div><div class="field"><select class="line-unit" aria-label="Unidad de ingrediente"></select></div><button type="button" aria-label="Quitar ingrediente">×</button>`;
+    const ingredientSelect = row.querySelector(".line-ingredient");
+    const quantityInput = row.querySelector(".line-quantity");
+    const unitSelect = row.querySelector(".line-unit");
+    if (line) ingredientSelect.value = line.ingredientId;
+    let selectedIngredient = ingredientById(ingredientSelect.value);
+    let selectedUnit = line?.unit || (line ? selectedIngredient.baseUnit : ingredientUnit(selectedIngredient));
+    const updateUnits = () => {
+      unitSelect.innerHTML = unitGroups[selectedIngredient.baseUnit].map((unit) => '<option value="' + unit.value + '">' + unit.label + '</option>').join("");
+      unitSelect.value = selectedUnit;
+    };
+    updateUnits();
+    ingredientSelect.addEventListener("change", () => {
+      selectedIngredient = ingredientById(ingredientSelect.value);
+      if (!unitGroups[selectedIngredient.baseUnit].some((unit) => unit.value === selectedUnit)) selectedUnit = ingredientUnit(selectedIngredient);
+      updateUnits();
+      updatePreview();
+    });
+    unitSelect.addEventListener("change", () => {
+      if (quantityInput.value !== "") quantityInput.value = toBaseQuantity(quantityInput.value, selectedUnit, selectedIngredient.baseUnit) / toBaseQuantity(1, unitSelect.value, selectedIngredient.baseUnit);
+      selectedUnit = unitSelect.value;
+      updatePreview();
+    });
     row.querySelector("button").addEventListener("click", () => { if (lines.children.length > 1) row.remove(); updatePreview(); });
-    row.querySelectorAll("input,select").forEach((field) => field.addEventListener("input", updatePreview));
+    quantityInput.addEventListener("input", updatePreview);
     lines.append(row);
   };
-  const getDraft = () => ({ yieldQuantity: Number(form.elements.yieldQuantity.value || 1), recipe: [...lines.children].map((row) => ({ ingredientId: row.querySelector("select").value, quantity: Number(row.querySelector("input").value || 0) })), optionalCosts: Object.fromEntries(Object.keys(optionalLabels).map((key) => [key, Number(form.elements[key].value || 0)])) });
+  const getDraft = () => ({ yieldQuantity: Number(form.elements.yieldQuantity.value || 1), recipe: [...lines.children].map((row) => ({ ingredientId: row.querySelector(".line-ingredient").value, quantity: Number(row.querySelector(".line-quantity").value || 0), unit: row.querySelector(".line-unit").value })), optionalCosts: Object.fromEntries(Object.keys(optionalLabels).map((key) => [key, Number(form.elements[key].value || 0)])) });
   const updatePreview = () => { form.querySelector("#cost-preview").textContent = money.format(recipeCost(getDraft(), state.ingredients).batchCost); };
   form.querySelector("#add-line").addEventListener("click", () => addLine());
   form.querySelectorAll("input").forEach((field) => field.addEventListener("input", updatePreview));
@@ -425,8 +464,8 @@ function openProductDialog(existing = null) {
 
 function renderProduction() {
   const productions = state.productions.filter((item) => !item.deletedAt).slice().reverse();
-  app.innerHTML = pageHeading("Producción", "Registrá cada elaboración y descontá sus insumos del inventario.", `<button class="primary" id="new-production" ${state.products.length ? "" : "disabled"}>Registrar producción</button>`) + `
-    ${!state.products.length ? `<p class="warning">Necesitás un producto con receta antes de registrar una producción.</p>` : ""}
+  app.innerHTML = pageHeading("Producción", "Registrá cada elaboración y descontá sus insumos del inventario.", `<button class="primary" id="new-production" ${activeProducts().length ? "" : "disabled"}>Registrar producción</button>`) + `
+    ${!activeProducts().length ? `<p class="warning">Necesitás un producto con receta antes de registrar una producción.</p>` : ""}
     <article class="card">${productions.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tandas</th><th>Unidades obtenidas</th><th>Costo total</th><th>Estado</th><th></th></tr></thead><tbody>${productions.map((production) => `<tr class="production-row ${production.voidedAt ? "voided-row" : ""}" data-production-details="${production.id}"><td>${h(production.date)}</td><td><button class="production-name" data-open-production="${production.id}">${h(production.productNameSnapshot || productById(production.productId)?.name || "Producto eliminado")}<small>Ver desglose</small></button></td><td>${decimal.format(production.batches)}</td><td>${decimal.format(production.producedQuantity)}</td><td>${money.format(production.totalCostSnapshot)}${production.costUnestimated ? `<small class="history-note muted">Costo parcial: aporte sin estimar</small>` : ""}</td><td>${production.voidedAt ? `<span class="status status-cancelado">Anulada</span>` : `<span class="status status-entregado">Registrada</span>`}</td><td class="actions"><div class="row-actions">${production.voidedAt ? "" : `<button class="ghost compact-button" data-void-production="${production.id}">Anular</button>`}<button class="danger compact-button" data-delete-production="${production.id}">Eliminar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Las elaboraciones registradas aparecerán aquí.")}</article>`;
   app.querySelector("#new-production")?.addEventListener("click", openProductionDialog);
   app.querySelectorAll("[data-production-details]").forEach((row) => row.addEventListener("click", (event) => {
@@ -487,7 +526,7 @@ function deleteProduction(productionId) {
 }
 
 function openProductionDialog() {
-  const modal = dialog(`<h2>Registrar producción</h2><p>Si falta stock registrado, podés indicar que usaste insumos de casa.</p><form><div class="form-grid"><div class="field full"><label>Producto</label><select name="productId">${state.products.map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad de tandas</label><input name="batches" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><div id="production-preview" class="production-preview"></div></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary" id="save-production">Registrar y descontar</button></div></form>`);
+  const modal = dialog(`<h2>Registrar producción</h2><p>Si falta stock registrado, podés indicar que usaste insumos de casa.</p><form><div class="form-grid"><div class="field full"><label>Producto</label><select name="productId">${activeProducts().map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad de tandas</label><input name="batches" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><div id="production-preview" class="production-preview"></div></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary" id="save-production">Registrar y descontar</button></div></form>`);
   const form = modal.querySelector("form");
   const preview = form.querySelector("#production-preview");
   const homeValues = () => Object.fromEntries([...preview.querySelectorAll("[data-home-cost]")].map((field) => [field.dataset.homeCost, Number(field.value || 0)]));
@@ -570,7 +609,7 @@ function renderAgenda() {
     (days[order.deliveryDate] ??= []).push(order);
     return days;
   }, {});
-  app.innerHTML = pageHeading("Agenda de entregas", "Pedidos activos organizados por fecha.", `<button class="primary" id="agenda-new-order" ${state.products.length ? "" : "disabled"}>Nuevo pedido</button>`) + `
+  app.innerHTML = pageHeading("Agenda de entregas", "Pedidos activos organizados por fecha.", `<button class="primary" id="agenda-new-order" ${activeProducts().length ? "" : "disabled"}>Nuevo pedido</button>`) + `
     ${active.length ? `<div class="agenda">${Object.entries(grouped).map(([date, orders]) => `<section class="agenda-day"><header><span>${new Intl.DateTimeFormat("es-UY", { weekday: "long" }).format(new Date(`${date}T12:00:00`))}</span><strong>${new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long" }).format(new Date(`${date}T12:00:00`))}</strong></header><div>${orders.map((order) => `<article class="agenda-order"><div><span class="status status-${order.status}">${statusLabels[order.status]}</span><h3>${h(order.customerName)}</h3><p>${h(productById(order.productId)?.name || "Producto eliminado")} · ${decimal.format(order.quantity)}</p></div><div class="agenda-balance"><small>Saldo</small><strong>${money.format(Math.max(order.totalPrice - order.deposit, 0))}</strong></div></article>`).join("")}</div></section>`).join("")}</div>` : `<article class="card">${empty("No hay entregas pendientes en la agenda.")}</article>`}`;
   app.querySelector("#agenda-new-order")?.addEventListener("click", () => openOrderDialog());
 }
@@ -579,8 +618,8 @@ function renderOrders() {
   const activeOrders = state.orders.filter((order) => !order.deletedAt);
   const { items: orders, total, page, pageCount } = pagedOrders(state.orders, orderFilters);
   orderFilters.page = page;
-  app.innerHTML = pageHeading("Pedidos", "Organizá encargos, señas, saldos y fechas de entrega.", `<button class="primary" id="new-order" ${state.products.length ? "" : "disabled"}>Nuevo pedido</button>`) + `
-    ${!state.products.length ? `<p class="warning">Antes de tomar un pedido necesitás crear al menos un producto.</p>` : ""}
+  app.innerHTML = pageHeading("Pedidos", "Organizá encargos, señas, saldos y fechas de entrega.", `<button class="primary" id="new-order" ${activeProducts().length ? "" : "disabled"}>Nuevo pedido</button>`) + `
+    ${!activeProducts().length ? `<p class="warning">Antes de tomar un pedido necesitás crear al menos un producto.</p>` : ""}
     <div class="filter-bar"><div class="field"><label for="order-client-filter">Cliente</label><select id="order-client-filter"><option value="">Todos los clientes</option>${customerOptions([...state.clients.map((client) => client.name), ...activeOrders.map((order) => order.customerName)], orderFilters.client)}</select></div><div class="field"><label for="order-status-filter">Estado</label><select id="order-status-filter"><option value="">Todos los estados</option>${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${orderFilters.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></div></div>
     ${orders.length ? `<div class="order-grid">${orders.map((order) => {
       const product = productById(order.productId);
@@ -610,8 +649,9 @@ function deleteOrder(orderId) {
 }
 
 function openOrderDialog(existing = null) {
-  const selectedProduct = productById(existing?.productId) || state.products[0];
-  const modal = dialog(`<h2>${existing ? "Editar pedido" : "Nuevo pedido"}</h2><p>Registrá lo necesario para preparar y cobrar el encargo.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}" ${existing?.clientId === client.id ? "selected" : ""}>${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field"><label>Cliente</label><input name="customerName" required value="${h(existing?.customerName || "")}" placeholder="Nombre del cliente"></div><div class="field"><label>Teléfono (opcional)</label><input name="phone" value="${h(existing?.phone || "")}" placeholder="099 000 000"></div><div class="field full"><label>Producto</label><select name="productId">${state.products.map((product) => `<option value="${product.id}" ${product.id === selectedProduct.id ? "selected" : ""}>${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="${existing?.quantity || 1}" required></div><div class="field"><label>Entrega</label><input name="deliveryDate" type="date" value="${existing?.deliveryDate || today()}" required></div><div class="field"><label>Total acordado ($)</label><input name="totalPrice" type="number" min="0" step="0.01" value="${existing?.totalPrice ?? selectedProduct.salePrice}" required></div><div class="field"><label>Seña recibida ($)</label><input name="deposit" type="number" min="0" step="0.01" value="${existing?.deposit || 0}"></div><div class="field full"><label>Notas (opcional)</label><input name="notes" value="${h(existing?.notes || "")}" placeholder="Decoración, horario, dedicatoria..."></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">${existing ? "Guardar cambios" : "Crear pedido"}</button></div></form>`);
+  const orderProducts = state.products.filter((product) => !product.deletedAt || product.id === existing?.productId);
+  const selectedProduct = productById(existing?.productId) || activeProducts()[0];
+  const modal = dialog(`<h2>${existing ? "Editar pedido" : "Nuevo pedido"}</h2><p>Registrá lo necesario para preparar y cobrar el encargo.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}" ${existing?.clientId === client.id ? "selected" : ""}>${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field"><label>Cliente</label><input name="customerName" required value="${h(existing?.customerName || "")}" placeholder="Nombre del cliente"></div><div class="field"><label>Teléfono (opcional)</label><input name="phone" value="${h(existing?.phone || "")}" placeholder="099 000 000"></div><div class="field full"><label>Producto</label><select name="productId">${orderProducts.map((product) => `<option value="${product.id}" ${product.id === selectedProduct.id ? "selected" : ""}>${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="${existing?.quantity || 1}" required></div><div class="field"><label>Entrega</label><input name="deliveryDate" type="date" value="${existing?.deliveryDate || today()}" required></div><div class="field"><label>Total acordado ($)</label><input name="totalPrice" type="number" min="0" step="0.01" value="${existing?.totalPrice ?? selectedProduct.salePrice}" required></div><div class="field"><label>Seña recibida ($)</label><input name="deposit" type="number" min="0" step="0.01" value="${existing?.deposit || 0}"></div><div class="field full"><label>Notas (opcional)</label><input name="notes" value="${h(existing?.notes || "")}" placeholder="Decoración, horario, dedicatoria..."></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">${existing ? "Guardar cambios" : "Crear pedido"}</button></div></form>`);
   const form = modal.querySelector("form");
   let automaticPrice = !existing;
   const suggestTotal = () => {
@@ -630,6 +670,7 @@ function openOrderDialog(existing = null) {
     event.preventDefault();
     const data = new FormData(form);
     const values = { clientId: data.get("clientId") || null, customerName: data.get("customerName").trim(), phone: data.get("phone").trim(), productId: data.get("productId"), quantity: Number(data.get("quantity")), deliveryDate: data.get("deliveryDate"), totalPrice: Number(data.get("totalPrice")), deposit: Number(data.get("deposit") || 0), notes: data.get("notes").trim() };
+    if (productById(values.productId)?.deletedAt && !["entregado", "cancelado"].includes(existing?.status)) return toast("La receta fue eliminada. Elegí otra receta.", 6000);
     if (values.deposit > values.totalPrice) return toast("La seña no puede superar el total");
     if (existing) Object.assign(existing, values);
     else state.orders.push({ id: uid("ord"), status: "pendiente", saleId: null, createdAt: today(), ...values });
@@ -640,6 +681,7 @@ function openOrderDialog(existing = null) {
 
 function updateOrderStatus(orderId, status) {
   const order = state.orders.find((item) => item.id === orderId);
+  if (productById(order.productId)?.deletedAt && !["entregado", "cancelado"].includes(status)) return toast("La receta fue eliminada. Creá una receta nueva antes de reactivar el pedido.", 6000);
   order.status = status;
   if (status === "entregado" && !order.saleId) {
     const product = productById(order.productId);
@@ -655,14 +697,14 @@ function updateOrderStatus(orderId, status) {
 
 function renderSales() {
   const sales = [...state.sales].sort((a, b) => b.date.localeCompare(a.date));
-  app.innerHTML = pageHeading("Ventas", "Cada venta conserva el costo que tenía la receta ese día.", `<button class="primary" id="new-sale" ${state.products.length ? "" : "disabled"}>Registrar venta</button>`) + `
-    ${!state.products.length ? `<p class="warning">Antes de vender necesitás crear un producto.</p>` : ""}
+  app.innerHTML = pageHeading("Ventas", "Cada venta conserva el costo que tenía la receta ese día.", `<button class="primary" id="new-sale" ${activeProducts().length ? "" : "disabled"}>Registrar venta</button>`) + `
+    ${!activeProducts().length ? `<p class="warning">Antes de vender necesitás crear un producto.</p>` : ""}
     <article class="card">${sales.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Ingresos</th><th>Ganancia bruta</th></tr></thead><tbody>${sales.map((sale) => `<tr><td>${sale.date}</td><td><strong>${h(productById(sale.productId)?.name || "Producto eliminado")}</strong></td><td>${decimal.format(sale.quantity)}</td><td>${money.format(sale.quantity * sale.unitPrice)}</td><td>${money.format(sale.quantity * (sale.unitPrice - sale.unitCostSnapshot))}</td></tr>`).join("")}</tbody></table></div>` : empty("Las ventas por encargo aparecerán aquí.")}</article>`;
   app.querySelector("#new-sale")?.addEventListener("click", openSaleDialog);
 }
 
 function openSaleDialog() {
-  const modal = dialog(`<h2>Registrar venta</h2><p>Podés cambiar el precio para este encargo sin modificar el producto. El cliente es opcional.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}">${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field full"><label>Nombre del cliente (opcional)</label><input name="customerName" placeholder="Ej. Lucía"></div><div class="field full"><label>Producto</label><select name="productId">${state.products.map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio por unidad ($)</label><input name="unitPrice" type="number" min="0" step="0.01" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar venta</button></div></form>`);
+  const modal = dialog(`<h2>Registrar venta</h2><p>Podés cambiar el precio para este encargo sin modificar el producto. El cliente es opcional.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}">${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field full"><label>Nombre del cliente (opcional)</label><input name="customerName" placeholder="Ej. Lucía"></div><div class="field full"><label>Producto</label><select name="productId">${activeProducts().map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio por unidad ($)</label><input name="unitPrice" type="number" min="0" step="0.01" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar venta</button></div></form>`);
   const form = modal.querySelector("form");
   const setPrice = () => { form.elements.unitPrice.value = productById(form.elements.productId.value).salePrice; };
   form.elements.productId.addEventListener("change", setPrice);

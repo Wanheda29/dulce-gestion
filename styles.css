@@ -83,7 +83,7 @@ input, select { width: 100%; padding: 11px 12px; border: 1px solid #d9cdca; bord
 input:focus, select:focus { outline: 3px solid rgba(138,61,85,.14); border-color: var(--berry); }
 .form-actions { justify-content: flex-end; margin-top: 24px; }
 .recipe-lines { display: grid; gap: 10px; }
-.recipe-line { display: grid; grid-template-columns: 1fr 130px 40px; gap: 8px; align-items: end; }
+.recipe-line { display: grid; grid-template-columns: minmax(0, 1fr) 110px 110px 40px; gap: 8px; align-items: end; }
 .recipe-line button { height: 42px; border: 0; border-radius: 10px; background: #fff0f0; color: #a33131; }
 .optional-box { background: #faf6f4; border-radius: 14px; padding: 16px; }
 .optional-box h3 { font-size: 1rem; margin: 0 0 5px; }
@@ -238,7 +238,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   dialog { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; }
   .dialog-body { max-height: 100dvh; padding: 24px 18px calc(28px + env(safe-area-inset-bottom)); }
   .recipe-line { grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
-  .recipe-line > .field:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .recipe-line > .field:nth-child(2) { grid-column: 1; grid-row: 2; }
+  .recipe-line > .field:nth-child(3) { grid-column: 1; grid-row: 3; }
   .recipe-line > button { grid-column: 2; grid-row: 1; min-height: 44px; }
   .client-grid { grid-template-columns: 1fr; }
   .agenda-day { grid-template-columns: 1fr; gap: 8px; }
