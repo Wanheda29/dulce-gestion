@@ -1,4 +1,5 @@
-import { correctPurchaseInventory, countedStock, customerKey, deleteProductRecord, deleteProductionRecord, ingredientQuantity, ingredientUnit, ingredientUnitCost, ingredientWithManualCost, monthlySummary, pagedOrders, productionCostBreakdown, productionPlan, productionWithHomeSupply, profitOnCostPercent, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
+import { correctPurchaseInventory, countedStock, customerKey, deleteProductRecord, deleteProductionRecord, ingredientQuantity, ingredientUnit, ingredientUnitCost, ingredientWithManualCost, monthlySummary, pagedOrders, productionCostBreakdown, productDefinition, productionPlan, productionWithHomeSupply, profitOnCostPercent, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
+import { renderCombos as renderComboPage } from "./combos.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
@@ -8,7 +9,7 @@ const money = new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU
 const preciseMoney = new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ingredientMoney = new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", minimumFractionDigits: 2, maximumFractionDigits: 6 });
 const decimal = new Intl.NumberFormat("es-UY", { maximumFractionDigits: 2 });
-const titles = { inicio: "Resumen", insumos: "Insumos", compras: "Compras", productos: "Productos y recetas", produccion: "Producción", clientes: "Clientes", pedidos: "Pedidos", agenda: "Agenda", ventas: "Ventas", informes: "Informes", datos: "Datos y respaldos", cuenta: "Cuenta" };
+const titles = { inicio: "Resumen", insumos: "Insumos", compras: "Compras", productos: "Productos y recetas", combos: "Combos", produccion: "Producción", clientes: "Clientes", pedidos: "Pedidos", agenda: "Agenda", ventas: "Ventas", informes: "Informes", datos: "Datos y respaldos", cuenta: "Cuenta" };
 const optionalLabels = { packaging: "Envases", labor: "Mano de obra", gas: "Gas", electricity: "Electricidad", delivery: "Reparto", other: "Otros" };
 const statusLabels = { pendiente: "Pendiente", confirmado: "Confirmado", produccion: "En producción", listo: "Listo", entregado: "Entregado", cancelado: "Cancelado" };
 const subscriptionLabels = { active: "Activa", grace: "Período de gracia", read_only: "Solo lectura", suspended: "Suspendida" };
@@ -47,7 +48,12 @@ const today = () => {
 const currentMonth = () => today().slice(0, 7);
 const ingredientById = (id) => state.ingredients.find((item) => item.id === id);
 const productById = (id) => state.products.find((item) => item.id === id);
-const activeProducts = () => state.products.filter((item) => !item.deletedAt);
+const activeProducts = () => state.products.filter((item) => !item.deletedAt && item.kind !== "combo");
+const activeSellables = () => state.products.filter((item) => {
+  if (item.deletedAt) return false;
+  try { productDefinition(item, state.products); return true; }
+  catch { return false; }
+});
 const clientById = (id) => state.clients.find((item) => item.id === id);
 const saleCustomerName = (sale) => resolveSaleCustomerName(sale, state.orders);
 const customerOptions = (names, selected) => [...new Map(names.filter(Boolean).map((name) => [customerKey(name), name.trim()])).entries()]
@@ -154,7 +160,7 @@ function render() {
   if (isCloudConfigured() && cloudSession && !cloudAccount && page !== "cuenta") { location.hash = "cuenta"; return; }
   if (cloudAccount?.status === "suspended" && page !== "cuenta") { renderSuspended(); return; }
   if (cloudWriteBlocked && page !== "cuenta" && page !== "datos") { renderSyncProblem(); return; }
-  ({ inicio: renderDashboard, insumos: renderIngredients, compras: renderPurchases, productos: renderProducts, produccion: renderProduction, clientes: renderClients, pedidos: renderOrders, agenda: renderAgenda, ventas: renderSales, informes: renderReports, datos: renderData, cuenta: renderAccount }[page] ?? renderDashboard)();
+  ({ inicio: renderDashboard, insumos: renderIngredients, compras: renderPurchases, productos: renderProducts, combos: renderCombos, produccion: renderProduction, clientes: renderClients, pedidos: renderOrders, agenda: renderAgenda, ventas: renderSales, informes: renderReports, datos: renderData, cuenta: renderAccount }[page] ?? renderDashboard)();
   labelResponsiveTables();
 }
 
@@ -224,7 +230,7 @@ function deleteIngredient(ingredientId) {
   if (!ingredient) return;
   const used = state.purchases.some((item) => item.ingredientId === ingredientId)
     || state.stockAdjustments.some((item) => item.ingredientId === ingredientId)
-    || state.products.some((item) => item.recipe.some((line) => line.ingredientId === ingredientId))
+    || state.products.some((item) => item.recipe?.some((line) => line.ingredientId === ingredientId))
     || state.productions.some((item) => item.requirementsSnapshot?.some((line) => line.ingredientId === ingredientId));
   if (used || Number(ingredient.stock) > 0) return toast("No se puede eliminar: tiene stock, compras, ajustes, recetas o producciones asociadas.", 6000);
   confirmAction("Eliminar insumo", `Se eliminará «${h(ingredient.name)}». Esta acción no se puede deshacer.`, "Eliminar insumo", () => {
@@ -299,7 +305,7 @@ function openIngredientCostDialog(ingredient) {
 }
 
 function openIngredientDialog(existing = null) {
-  const unitLocked = existing && (Number(existing.stock || 0) > 0 || Number(existing.averageCost || 0) > 0 || existing.costHistory?.length || state.stockAdjustments.some((entry) => entry.ingredientId === existing.id) || state.purchases.some((purchase) => purchase.ingredientId === existing.id) || state.products.some((product) => product.recipe.some((line) => line.ingredientId === existing.id)));
+  const unitLocked = existing && (Number(existing.stock || 0) > 0 || Number(existing.averageCost || 0) > 0 || existing.costHistory?.length || state.stockAdjustments.some((entry) => entry.ingredientId === existing.id) || state.purchases.some((purchase) => purchase.ingredientId === existing.id) || state.products.some((product) => product.recipe?.some((line) => line.ingredientId === existing.id)));
   const options = [{ value: "g", label: "Gramos" }, { value: "kg", label: "Kilogramos" }, { value: "ml", label: "Mililitros" }, { value: "unidad", label: "Unidades" }].filter((unit) => !unitLocked || unitGroups[existing.baseUnit].some((option) => option.value === unit.value));
   const modal = dialog(`<h2>${existing ? "Editar insumo" : "Nuevo insumo"}</h2><p>Elegí la unidad en la que querés ver la existencia y el costo del insumo.</p><form id="ingredient-form"><div class="form-grid"><div class="field full"><label>Nombre</label><input name="name" required value="${h(existing?.name || "")}" placeholder="Ej. Harina 0000"></div><div class="field full"><label for="ingredient-unit">Unidad del insumo</label><select id="ingredient-unit" name="baseUnit">${options.map((unit) => `<option value="${unit.value}" ${unit.value === (existing ? ingredientUnit(existing) : "g") ? "selected" : ""}>${unit.label}</option>`).join("")}</select>${unitLocked ? `<small class="muted">Las unidades compatibles se convierten automáticamente. Las recetas y los movimientos anteriores conservan sus cantidades.</small>` : ""}</div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar insumo</button></div></form>`);
   modal.querySelector("form").addEventListener("submit", (event) => {
@@ -385,11 +391,15 @@ function openPurchaseDialog(existing = null) {
   });
 }
 
+function renderCombos() {
+  renderComboPage({ app, state, pageHeading, dialog, persist, toast, h, money, decimal, uid, deleteProduct });
+}
+
 function renderProducts() {
   const products = activeProducts();
   app.innerHTML = pageHeading("Productos y recetas", "El costo se recalcula con los precios actuales de los insumos.", `<button class="primary" id="new-product" ${state.ingredients.length ? "" : "disabled"}>Nuevo producto</button>`) + `
     ${!state.ingredients.length ? `<p class="warning">Creá al menos un insumo antes de armar una receta.</p>` : ""}
-    <div class="grid-2">${products.length ? products.map((product) => { const cost = recipeCost(product, state.ingredients); const profitPercent = profitOnCostPercent(product.salePrice, cost.unitCost); return `<article class="card"><div class="card-title-row"><span class="pill">${h(product.category || "Producto")}</span><div class="row-actions"><button class="ghost compact-button" data-edit-product="${product.id}">Editar</button><button class="danger compact-button" data-delete-product="${product.id}">Eliminar receta</button></div></div><h2>${h(product.name)}</h2><p class="muted">La receta rinde ${decimal.format(product.yieldQuantity)} ${product.yieldQuantity === 1 ? "unidad" : "unidades"}.</p><div class="stats" style="grid-template-columns:1fr 1fr"><div><small class="muted">Costo unitario</small><br><strong>${money.format(cost.unitCost)}</strong></div><div><small class="muted">Precio de venta</small><br><strong>${money.format(product.salePrice)}</strong></div></div><p>Ganancia sobre costo: <strong>${profitPercent === null ? "Sin costo definido" : `${decimal.format(profitPercent)}%`}</strong></p></article>`; }).join("") : `<article class="card" style="grid-column:1/-1">${empty("Todavía no hay productos ni recetas.")}</article>`}</div>`;
+    <div class="grid-2">${products.length ? products.map((product) => { const cost = recipeCost(product, state.ingredients, state.products); const profitPercent = profitOnCostPercent(product.salePrice, cost.unitCost); return `<article class="card"><div class="card-title-row"><span class="pill">${h(product.category || "Producto")}</span><div class="row-actions"><button class="ghost compact-button" data-edit-product="${product.id}">Editar</button><button class="danger compact-button" data-delete-product="${product.id}">Eliminar receta</button></div></div><h2>${h(product.name)}</h2><p class="muted">La receta rinde ${decimal.format(product.yieldQuantity)} ${product.yieldQuantity === 1 ? "unidad" : "unidades"}.</p><div class="stats" style="grid-template-columns:1fr 1fr"><div><small class="muted">Costo unitario</small><br><strong>${money.format(cost.unitCost)}</strong></div><div><small class="muted">Precio de venta</small><br><strong>${money.format(product.salePrice)}</strong></div></div><p>Ganancia sobre costo: <strong>${profitPercent === null ? "Sin costo definido" : `${decimal.format(profitPercent)}%`}</strong></p></article>`; }).join("") : `<article class="card" style="grid-column:1/-1">${empty("Todavía no hay productos ni recetas.")}</article>`}</div>`;
   app.querySelector("#new-product")?.addEventListener("click", () => openProductDialog());
   app.querySelectorAll("[data-edit-product]").forEach((button) => button.addEventListener("click", () => openProductDialog(productById(button.dataset.editProduct))));
   app.querySelectorAll("[data-delete-product]").forEach((button) => button.addEventListener("click", () => deleteProduct(button.dataset.deleteProduct)));
@@ -397,12 +407,13 @@ function renderProducts() {
 
 function deleteProduct(productId) {
   const product = productById(productId);
-  try { deleteProductRecord(product, state.orders, new Date().toISOString()); }
+  try { deleteProductRecord(product, state.orders, new Date().toISOString(), null, state.products); }
   catch (error) { return toast(error.message, 6000); }
-  confirmAction("Eliminar receta", "Se quitará «" + h(product.name) + "» de Productos y recetas y de las opciones para nuevos registros. Las ventas, producciones e informes anteriores se conservan.", "Eliminar receta", () => {
+  const label = product.kind === "combo" ? "combo" : "receta";
+  confirmAction(`Eliminar ${label}`, "Se quitará «" + h(product.name) + "» del catálogo y de las opciones para nuevos registros. Las ventas, producciones e informes anteriores se conservan.", `Eliminar ${label}`, () => {
     try {
-      Object.assign(product, deleteProductRecord(product, state.orders, new Date().toISOString(), cloudSession?.user?.email || null));
-      persist("Receta eliminada");
+      Object.assign(product, deleteProductRecord(product, state.orders, new Date().toISOString(), cloudSession?.user?.email || null, state.products));
+      persist(product.kind === "combo" ? "Combo eliminado" : "Receta eliminada");
     } catch (error) { toast(error.message, 6000); }
   });
 }
@@ -464,8 +475,8 @@ function openProductDialog(existing = null) {
 
 function renderProduction() {
   const productions = state.productions.filter((item) => !item.deletedAt).slice().reverse();
-  app.innerHTML = pageHeading("Producción", "Registrá cada elaboración y descontá sus insumos del inventario.", `<button class="primary" id="new-production" ${activeProducts().length ? "" : "disabled"}>Registrar producción</button>`) + `
-    ${!activeProducts().length ? `<p class="warning">Necesitás un producto con receta antes de registrar una producción.</p>` : ""}
+  app.innerHTML = pageHeading("Producción", "Registrá cada elaboración y descontá sus insumos del inventario.", `<button class="primary" id="new-production" ${activeSellables().length ? "" : "disabled"}>Registrar producción</button>`) + `
+    ${!activeSellables().length ? `<p class="warning">Necesitás un producto con receta antes de registrar una producción.</p>` : ""}
     <article class="card">${productions.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tandas</th><th>Unidades obtenidas</th><th>Costo total</th><th>Estado</th><th></th></tr></thead><tbody>${productions.map((production) => `<tr class="production-row ${production.voidedAt ? "voided-row" : ""}" data-production-details="${production.id}"><td>${h(production.date)}</td><td><button class="production-name" data-open-production="${production.id}">${h(production.productNameSnapshot || productById(production.productId)?.name || "Producto eliminado")}<small>Ver desglose</small></button></td><td>${decimal.format(production.batches)}</td><td>${decimal.format(production.producedQuantity)}</td><td>${money.format(production.totalCostSnapshot)}${production.costUnestimated ? `<small class="history-note muted">Costo parcial: aporte sin estimar</small>` : ""}</td><td>${production.voidedAt ? `<span class="status status-cancelado">Anulada</span>` : `<span class="status status-entregado">Registrada</span>`}</td><td class="actions"><div class="row-actions">${production.voidedAt ? "" : `<button class="ghost compact-button" data-void-production="${production.id}">Anular</button>`}<button class="danger compact-button" data-delete-production="${production.id}">Eliminar</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("Las elaboraciones registradas aparecerán aquí.")}</article>`;
   app.querySelector("#new-production")?.addEventListener("click", openProductionDialog);
   app.querySelectorAll("[data-production-details]").forEach((row) => row.addEventListener("click", (event) => {
@@ -526,19 +537,19 @@ function deleteProduction(productionId) {
 }
 
 function openProductionDialog() {
-  const modal = dialog(`<h2>Registrar producción</h2><p>Si falta stock registrado, podés indicar que usaste insumos de casa.</p><form><div class="form-grid"><div class="field full"><label>Producto</label><select name="productId">${activeProducts().map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad de tandas</label><input name="batches" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><div id="production-preview" class="production-preview"></div></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary" id="save-production">Registrar y descontar</button></div></form>`);
+  const modal = dialog(`<h2>Registrar producción</h2><p>Si falta stock registrado, podés indicar que usaste insumos de casa.</p><form><div class="form-grid"><div class="field full"><label>Producto</label><select name="productId">${activeSellables().map((product) => `<option value="${product.id}">${product.kind === "combo" ? "Combo · " : ""}${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad de tandas</label><input name="batches" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div><div class="field full"><div id="production-preview" class="production-preview"></div></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary" id="save-production">Registrar y descontar</button></div></form>`);
   const form = modal.querySelector("form");
   const preview = form.querySelector("#production-preview");
   const homeValues = () => Object.fromEntries([...preview.querySelectorAll("[data-home-cost]")].map((field) => [field.dataset.homeCost, Number(field.value || 0)]));
   const refreshCost = () => {
     try {
-      const result = productionWithHomeSupply(productById(form.elements.productId.value), state.ingredients, Number(form.elements.batches.value || 1), homeValues());
+      const result = productionWithHomeSupply(productById(form.elements.productId.value), state.ingredients, Number(form.elements.batches.value || 1), homeValues(), state.products);
       preview.querySelector("#production-cost").textContent = money.format(result.plan.totalCost);
     } catch { /* El formulario nativo señala valores incompletos. */ }
   };
   const updatePreview = () => {
     const product = productById(form.elements.productId.value);
-    const plan = productionPlan(product, state.ingredients, Number(form.elements.batches.value || 1));
+    const plan = productionPlan(product, state.ingredients, Number(form.elements.batches.value || 1), state.products);
     preview.innerHTML = `<div class="cost-preview"><span>Se obtendrá${plan.producedQuantity === 1 ? "" : "n"} <strong>${decimal.format(plan.producedQuantity)}</strong> ${plan.producedQuantity === 1 ? "unidad" : "unidades"}</span><strong id="production-cost">${money.format(plan.totalCost)}</strong></div><div class="requirement-list">${plan.requirements.map((line) => `<div class="requirement ${line.enough ? "enough" : "missing"}"><span>${h(line.name)}</span><span>${decimal.format(line.required)} ${h(line.unit)} / ${decimal.format(line.available)} ${h(line.unit)}</span></div>`).join("")}</div>${plan.canProduce ? "" : `<div class="warning"><strong>Falta stock registrado.</strong> Si usaste insumos de casa, indicá el valor aproximado de lo que faltó. El aporte quedará en el historial, no en Compras.${plan.requirements.filter((line) => !line.enough).map((line) => `<div class="field home-cost-field"><label>Valor de ${decimal.format(line.required - line.available)} ${h(line.unit)} de ${h(line.name)} ($)</label><input data-home-cost="${h(line.ingredientId)}" type="number" min="0" step="0.01" value="${((line.required - line.available) * Number(ingredientById(line.ingredientId)?.averageCost || 0)).toFixed(2)}"><small>Si no conocés el valor, dejá cero y el costo se marcará como parcial.</small></div>`).join("")}</div>`}`;
     form.querySelector("#save-production").textContent = plan.canProduce ? "Registrar y descontar" : "Registrar con insumos de casa";
     preview.querySelectorAll("[data-home-cost]").forEach((field) => field.addEventListener("input", refreshCost));
@@ -551,7 +562,7 @@ function openProductionDialog() {
     event.preventDefault();
     const product = productById(form.elements.productId.value);
     let result;
-    try { result = productionWithHomeSupply(product, state.ingredients, Number(form.elements.batches.value), homeValues()); }
+    try { result = productionWithHomeSupply(product, state.ingredients, Number(form.elements.batches.value), homeValues(), state.products); }
     catch (error) { return toast(error.message); }
     const productionId = uid("prod");
     result.ingredients.forEach((updated) => {
@@ -561,7 +572,7 @@ function openProductionDialog() {
     });
     result.adjustments.forEach((entry) => state.stockAdjustments.push({ ...entry, id: uid("adj"), ingredientName: ingredientById(entry.ingredientId).name, unit: ingredientById(entry.ingredientId).baseUnit, reason: "production", note: `Producción de ${product.name}`, date: form.elements.date.value, createdAt: new Date().toISOString(), actorEmail: cloudSession?.user?.email || null, sourceProductionId: productionId }));
     result.plan.requirements.forEach((line) => { ingredientById(line.ingredientId).stock -= line.required; });
-    const optionalCostsSnapshot = Object.entries(product.optionalCosts || {}).map(([key, value]) => ({ label: optionalLabels[key] || key, totalCost: Number(value || 0) * result.plan.batches })).filter((line) => line.totalCost > 0);
+    const optionalCostsSnapshot = Object.entries(productDefinition(product, state.products).optionalCosts || {}).map(([key, value]) => ({ label: optionalLabels[key] || key, totalCost: Number(value || 0) * result.plan.batches })).filter((line) => line.totalCost > 0);
     state.productions.push({ id: productionId, productId: product.id, productNameSnapshot: product.name, date: form.elements.date.value, batches: result.plan.batches, producedQuantity: result.plan.producedQuantity, totalCostSnapshot: result.plan.totalCost, unitCostSnapshot: result.plan.unitCost, costUnestimated: result.costUnestimated, requirementsSnapshot: result.plan.requirements, optionalCostsSnapshot });
     modal.close();
     persist("Producción registrada e insumos descontados");
@@ -609,7 +620,7 @@ function renderAgenda() {
     (days[order.deliveryDate] ??= []).push(order);
     return days;
   }, {});
-  app.innerHTML = pageHeading("Agenda de entregas", "Pedidos activos organizados por fecha.", `<button class="primary" id="agenda-new-order" ${activeProducts().length ? "" : "disabled"}>Nuevo pedido</button>`) + `
+  app.innerHTML = pageHeading("Agenda de entregas", "Pedidos activos organizados por fecha.", `<button class="primary" id="agenda-new-order" ${activeSellables().length ? "" : "disabled"}>Nuevo pedido</button>`) + `
     ${active.length ? `<div class="agenda">${Object.entries(grouped).map(([date, orders]) => `<section class="agenda-day"><header><span>${new Intl.DateTimeFormat("es-UY", { weekday: "long" }).format(new Date(`${date}T12:00:00`))}</span><strong>${new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long" }).format(new Date(`${date}T12:00:00`))}</strong></header><div>${orders.map((order) => `<article class="agenda-order"><div><span class="status status-${order.status}">${statusLabels[order.status]}</span><h3>${h(order.customerName)}</h3><p>${h(productById(order.productId)?.name || "Producto eliminado")} · ${decimal.format(order.quantity)}</p></div><div class="agenda-balance"><small>Saldo</small><strong>${money.format(Math.max(order.totalPrice - order.deposit, 0))}</strong></div></article>`).join("")}</div></section>`).join("")}</div>` : `<article class="card">${empty("No hay entregas pendientes en la agenda.")}</article>`}`;
   app.querySelector("#agenda-new-order")?.addEventListener("click", () => openOrderDialog());
 }
@@ -618,8 +629,8 @@ function renderOrders() {
   const activeOrders = state.orders.filter((order) => !order.deletedAt);
   const { items: orders, total, page, pageCount } = pagedOrders(state.orders, orderFilters);
   orderFilters.page = page;
-  app.innerHTML = pageHeading("Pedidos", "Organizá encargos, señas, saldos y fechas de entrega.", `<button class="primary" id="new-order" ${activeProducts().length ? "" : "disabled"}>Nuevo pedido</button>`) + `
-    ${!activeProducts().length ? `<p class="warning">Antes de tomar un pedido necesitás crear al menos un producto.</p>` : ""}
+  app.innerHTML = pageHeading("Pedidos", "Organizá encargos, señas, saldos y fechas de entrega.", `<button class="primary" id="new-order" ${activeSellables().length ? "" : "disabled"}>Nuevo pedido</button>`) + `
+    ${!activeSellables().length ? `<p class="warning">Antes de tomar un pedido necesitás crear al menos un producto.</p>` : ""}
     <div class="filter-bar"><div class="field"><label for="order-client-filter">Cliente</label><select id="order-client-filter"><option value="">Todos los clientes</option>${customerOptions([...state.clients.map((client) => client.name), ...activeOrders.map((order) => order.customerName)], orderFilters.client)}</select></div><div class="field"><label for="order-status-filter">Estado</label><select id="order-status-filter"><option value="">Todos los estados</option>${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${orderFilters.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></div></div>
     ${orders.length ? `<div class="order-grid">${orders.map((order) => {
       const product = productById(order.productId);
@@ -649,9 +660,11 @@ function deleteOrder(orderId) {
 }
 
 function openOrderDialog(existing = null) {
-  const orderProducts = state.products.filter((product) => !product.deletedAt || product.id === existing?.productId);
-  const selectedProduct = productById(existing?.productId) || activeProducts()[0];
-  const modal = dialog(`<h2>${existing ? "Editar pedido" : "Nuevo pedido"}</h2><p>Registrá lo necesario para preparar y cobrar el encargo.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}" ${existing?.clientId === client.id ? "selected" : ""}>${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field"><label>Cliente</label><input name="customerName" required value="${h(existing?.customerName || "")}" placeholder="Nombre del cliente"></div><div class="field"><label>Teléfono (opcional)</label><input name="phone" value="${h(existing?.phone || "")}" placeholder="099 000 000"></div><div class="field full"><label>Producto</label><select name="productId">${orderProducts.map((product) => `<option value="${product.id}" ${product.id === selectedProduct.id ? "selected" : ""}>${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="${existing?.quantity || 1}" required></div><div class="field"><label>Entrega</label><input name="deliveryDate" type="date" value="${existing?.deliveryDate || today()}" required></div><div class="field"><label>Total acordado ($)</label><input name="totalPrice" type="number" min="0" step="0.01" value="${existing?.totalPrice ?? selectedProduct.salePrice}" required></div><div class="field"><label>Seña recibida ($)</label><input name="deposit" type="number" min="0" step="0.01" value="${existing?.deposit || 0}"></div><div class="field full"><label>Notas (opcional)</label><input name="notes" value="${h(existing?.notes || "")}" placeholder="Decoración, horario, dedicatoria..."></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">${existing ? "Guardar cambios" : "Crear pedido"}</button></div></form>`);
+  const orderProducts = [...activeSellables()];
+  const existingProduct = productById(existing?.productId);
+  if (existingProduct && !orderProducts.some((product) => product.id === existingProduct.id)) orderProducts.push(existingProduct);
+  const selectedProduct = productById(existing?.productId) || activeSellables()[0];
+  const modal = dialog(`<h2>${existing ? "Editar pedido" : "Nuevo pedido"}</h2><p>Registrá lo necesario para preparar y cobrar el encargo.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}" ${existing?.clientId === client.id ? "selected" : ""}>${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field"><label>Cliente</label><input name="customerName" required value="${h(existing?.customerName || "")}" placeholder="Nombre del cliente"></div><div class="field"><label>Teléfono (opcional)</label><input name="phone" value="${h(existing?.phone || "")}" placeholder="099 000 000"></div><div class="field full"><label>Producto</label><select name="productId">${orderProducts.map((product) => `<option value="${product.id}" ${product.id === selectedProduct.id ? "selected" : ""}>${product.kind === "combo" ? "Combo · " : ""}${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="${existing?.quantity || 1}" required></div><div class="field"><label>Entrega</label><input name="deliveryDate" type="date" value="${existing?.deliveryDate || today()}" required></div><div class="field"><label>Total acordado ($)</label><input name="totalPrice" type="number" min="0" step="0.01" value="${existing?.totalPrice ?? selectedProduct.salePrice}" required></div><div class="field"><label>Seña recibida ($)</label><input name="deposit" type="number" min="0" step="0.01" value="${existing?.deposit || 0}"></div><div class="field full"><label>Notas (opcional)</label><input name="notes" value="${h(existing?.notes || "")}" placeholder="Decoración, horario, dedicatoria..."></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">${existing ? "Guardar cambios" : "Crear pedido"}</button></div></form>`);
   const form = modal.querySelector("form");
   let automaticPrice = !existing;
   const suggestTotal = () => {
@@ -682,29 +695,32 @@ function openOrderDialog(existing = null) {
 function updateOrderStatus(orderId, status) {
   const order = state.orders.find((item) => item.id === orderId);
   if (productById(order.productId)?.deletedAt && !["entregado", "cancelado"].includes(status)) return toast("La receta fue eliminada. Creá una receta nueva antes de reactivar el pedido.", 6000);
-  order.status = status;
   if (status === "entregado" && !order.saleId) {
     const product = productById(order.productId);
-    const sale = saleFromOrder(order, product, state.ingredients, today(), uid("sale"));
+    let sale;
+    try { sale = saleFromOrder(order, product, state.ingredients, today(), uid("sale"), state.products); }
+    catch (error) { return toast(error.message, 6000); }
+    order.status = status;
     state.sales.push(sale);
     order.saleId = sale.id;
     order.deliveredAt = today();
     persist("Pedido entregado y venta registrada");
     return;
   }
+  order.status = status;
   persist("Estado del pedido actualizado");
 }
 
 function renderSales() {
   const sales = [...state.sales].sort((a, b) => b.date.localeCompare(a.date));
-  app.innerHTML = pageHeading("Ventas", "Cada venta conserva el costo que tenía la receta ese día.", `<button class="primary" id="new-sale" ${activeProducts().length ? "" : "disabled"}>Registrar venta</button>`) + `
-    ${!activeProducts().length ? `<p class="warning">Antes de vender necesitás crear un producto.</p>` : ""}
+  app.innerHTML = pageHeading("Ventas", "Cada venta conserva el costo que tenía la receta ese día.", `<button class="primary" id="new-sale" ${activeSellables().length ? "" : "disabled"}>Registrar venta</button>`) + `
+    ${!activeSellables().length ? `<p class="warning">Antes de vender necesitás crear un producto.</p>` : ""}
     <article class="card">${sales.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Ingresos</th><th>Ganancia bruta</th></tr></thead><tbody>${sales.map((sale) => `<tr><td>${sale.date}</td><td><strong>${h(productById(sale.productId)?.name || "Producto eliminado")}</strong></td><td>${decimal.format(sale.quantity)}</td><td>${money.format(sale.quantity * sale.unitPrice)}</td><td>${money.format(sale.quantity * (sale.unitPrice - sale.unitCostSnapshot))}</td></tr>`).join("")}</tbody></table></div>` : empty("Las ventas por encargo aparecerán aquí.")}</article>`;
   app.querySelector("#new-sale")?.addEventListener("click", openSaleDialog);
 }
 
 function openSaleDialog() {
-  const modal = dialog(`<h2>Registrar venta</h2><p>Podés cambiar el precio para este encargo sin modificar el producto. El cliente es opcional.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}">${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field full"><label>Nombre del cliente (opcional)</label><input name="customerName" placeholder="Ej. Lucía"></div><div class="field full"><label>Producto</label><select name="productId">${activeProducts().map((product) => `<option value="${product.id}">${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio por unidad ($)</label><input name="unitPrice" type="number" min="0" step="0.01" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar venta</button></div></form>`);
+  const modal = dialog(`<h2>Registrar venta</h2><p>Podés cambiar el precio para este encargo sin modificar el producto. El cliente es opcional.</p><form><div class="form-grid">${state.clients.length ? `<div class="field full"><label>Cliente guardado (opcional)</label><select name="clientId"><option value="">Ingresar manualmente</option>${state.clients.map((client) => `<option value="${client.id}">${h(client.name)}</option>`).join("")}</select></div>` : ""}<div class="field full"><label>Nombre del cliente (opcional)</label><input name="customerName" placeholder="Ej. Lucía"></div><div class="field full"><label>Producto</label><select name="productId">${activeSellables().map((product) => `<option value="${product.id}">${product.kind === "combo" ? "Combo · " : ""}${h(product.name)}</option>`).join("")}</select></div><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio por unidad ($)</label><input name="unitPrice" type="number" min="0" step="0.01" required></div><div class="field"><label>Fecha</label><input name="date" type="date" value="${today()}" required></div></div><div class="form-actions"><button type="button" class="ghost" data-close>Cancelar</button><button class="primary">Guardar venta</button></div></form>`);
   const form = modal.querySelector("form");
   const setPrice = () => { form.elements.unitPrice.value = productById(form.elements.productId.value).salePrice; };
   form.elements.productId.addEventListener("change", setPrice);
@@ -716,7 +732,9 @@ function openSaleDialog() {
     event.preventDefault();
     const data = new FormData(form);
     const product = productById(data.get("productId"));
-    const cost = recipeCost(product, state.ingredients).unitCost;
+    let cost;
+    try { cost = recipeCost(product, state.ingredients, state.products).unitCost; }
+    catch (error) { return toast(error.message, 6000); }
     const customerName = String(data.get("customerName") || "").trim();
     const selectedClient = clientById(data.get("clientId"));
     state.sales.push({ id: uid("sale"), productId: product.id, quantity: Number(data.get("quantity")), unitPrice: Number(data.get("unitPrice")), unitCostSnapshot: cost, date: data.get("date"), customerName, clientId: selectedClient && customerKey(selectedClient.name) === customerKey(customerName) ? selectedClient.id : null });
@@ -751,10 +769,10 @@ function renderData() {
   const restoringDisabled = cloudAccount && (cloudWriteBlocked || !["active", "grace"].includes(cloudAccount.status));
   app.innerHTML = pageHeading("Datos y respaldos", "Descargá una copia o restaurá información desde un archivo válido.") + `
     <div class="backup-grid">
-      <article class="card backup-card"><div class="backup-icon">↓</div><div><h2>Crear respaldo</h2><p>Descarga los insumos, el historial de ajustes, las recetas, compras, clientes, pedidos, producciones y ventas en un único archivo JSON.</p></div><button class="primary" id="download-backup">Descargar respaldo</button></article>
+      <article class="card backup-card"><div class="backup-icon">↓</div><div><h2>Crear respaldo</h2><p>Descarga los insumos, el historial de ajustes, las recetas y combos, compras, clientes, pedidos, producciones y ventas en un único archivo JSON.</p></div><button class="primary" id="download-backup">Descargar respaldo</button></article>
       <article class="card backup-card"><div class="backup-icon">↑</div><div><h2>Restaurar respaldo</h2><p>El archivo se revisará antes de reemplazar los datos actuales. También se aceptan respaldos de la versión anterior.</p></div><button class="secondary" id="choose-backup" ${restoringDisabled ? "disabled" : ""}>Elegir archivo</button><input id="backup-file" type="file" accept="application/json,.json" hidden></article>
     </div>
-    <article class="card data-summary"><h3>${cloudAccount ? "Datos del negocio" : "Contenido actual de este dispositivo"}</h3><div>${Object.entries({ Insumos: summary.ingredients, Ajustes: summary.stockAdjustments, Compras: summary.purchases, Productos: summary.products, Producciones: summary.productions, Clientes: summary.clients, Pedidos: summary.orders, Ventas: summary.sales }).map(([label, value]) => `<span><strong>${value}</strong><small>${label}</small></span>`).join("")}</div><p class="warning"><strong>Importante:</strong> ${cloudAccount ? cloudWriteBlocked ? "Hay cambios pendientes de sincronización. Descargá un respaldo del borrador." : "Descargá respaldos periódicos además de la sincronización." : "La información vive solamente en este navegador. Descargá respaldos con frecuencia."}</p></article>`;
+    <article class="card data-summary"><h3>${cloudAccount ? "Datos del negocio" : "Contenido actual de este dispositivo"}</h3><div>${Object.entries({ Insumos: summary.ingredients, Ajustes: summary.stockAdjustments, Compras: summary.purchases, "Productos y combos": summary.products, Producciones: summary.productions, Clientes: summary.clients, Pedidos: summary.orders, Ventas: summary.sales }).map(([label, value]) => `<span><strong>${value}</strong><small>${label}</small></span>`).join("")}</div><p class="warning"><strong>Importante:</strong> ${cloudAccount ? cloudWriteBlocked ? "Hay cambios pendientes de sincronización. Descargá un respaldo del borrador." : "Descargá respaldos periódicos además de la sincronización." : "La información vive solamente en este navegador. Descargá respaldos con frecuencia."}</p></article>`;
   app.querySelector("#download-backup").addEventListener("click", () => { exportState(state); toast("Respaldo descargado"); });
   const fileInput = app.querySelector("#backup-file");
   app.querySelector("#choose-backup").addEventListener("click", () => fileInput.click());
@@ -765,7 +783,7 @@ function renderData() {
     try {
       const backup = parseBackup(await file.text());
       const incoming = backupSummary(backup.data);
-      const detail = `${incoming.ingredients} insumos, ${incoming.stockAdjustments} ajustes de stock, ${incoming.products} productos, ${incoming.clients} clientes, ${incoming.orders} pedidos y ${incoming.sales} ventas`;
+      const detail = `${incoming.ingredients} insumos, ${incoming.stockAdjustments} ajustes de stock, ${incoming.products} productos y combos, ${incoming.clients} clientes, ${incoming.orders} pedidos y ${incoming.sales} ventas`;
       confirmAction("Restaurar respaldo", `Se reemplazarán los datos de este navegador por: ${detail}. Esta acción no se puede deshacer sin un respaldo de la información actual.`, "Restaurar datos", () => {
         state = backup.data;
         persist(backup.legacy ? "Respaldo anterior restaurado" : "Respaldo restaurado");

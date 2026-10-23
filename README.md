@@ -23,6 +23,9 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 - Compras y costo promedio ponderado. Las compras pueden corregirse o eliminarse con ajuste de stock e historial; si el stock o su valor quedarían negativos, la corrección se rechaza.
 - Ajustes manuales de stock con motivo e historial; aportes de insumos del hogar al registrar producciones sin stock suficiente.
 - Productos, recetas, rendimiento y precio de venta.
+- Combos en un apartado propio: packs con cantidades de productos, empaque adicional, costo actualizado según recetas e insumos, precio de venta y ganancia. Permiten copiar una descripción con su precio para redes, sin incluir costos internos.
+- Los combos se pueden elegir en pedidos, ventas y producción. Sus costos históricos quedan conservados al registrar ventas y producciones; sus ingredientes compartidos se suman antes de descontar stock.
+- Los productos incluidos en combos activos no pueden eliminarse hasta quitarlos del pack. Los combos pueden editarse o eliminarse conservando el historial; los pedidos pendientes deben completarse o cancelarse antes de eliminarlos.
 - Cada ingrediente de una receta permite elegir una unidad compatible, por ejemplo 500 g de un insumo registrado en kg. La conversión se aplica al costo y al consumo de stock.
 - Ganancia sobre costo: `(precio de venta - costo) / costo × 100`. Un costo de $100 y una venta de $120 representan 20%; si el costo es cero se muestra «Sin costo definido».
 - Eliminación de recetas con confirmación: desaparecen de las opciones para nuevos registros, conservando ventas, producciones e informes históricos. Primero deben completarse o cancelarse sus pedidos pendientes.
@@ -37,6 +40,7 @@ La aplicación no necesita compilación: se puede publicar la raíz del reposito
 - Anulación auditable de producciones con devolución exacta de insumos.
 - Eliminación de producciones: desaparecen de la lista, revierten el stock si estaban activas y permanecen en el respaldo para auditoría. Cada producción muestra un desglose de sus costos históricos; las nuevas también guardan el detalle de gastos adicionales.
 - Respaldos versionados, restauración validada y compatibilidad con exportaciones anteriores.
+- Los nuevos respaldos usan versión 3 para conservar combos y siguen aceptando respaldos de las versiones 1 y 2.
 - Integración opcional con Supabase para login, sincronización y control del estado comercial.
 - Conversión automática y única de un pedido entregado en una venta.
 - Informe mensual y exportación de respaldo.

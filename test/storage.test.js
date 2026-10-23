@@ -11,7 +11,7 @@ const sample = () => ({
 test("crea y restaura un respaldo versionado", () => {
   const backup = createBackup(sample(), "2026-09-18T12:00:00.000Z");
   const restored = parseBackup(JSON.stringify(backup));
-  assert.equal(restored.schemaVersion, 2);
+  assert.equal(restored.schemaVersion, 3);
   assert.equal(restored.legacy, false);
   assert.equal(restored.data.ingredients[0].name, "Harina");
 });
