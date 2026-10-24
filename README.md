@@ -12,9 +12,21 @@ npm run serve
 
 Abrir `http://localhost:4173`. Las pruebas se ejecutan con `npm test`.
 
-## Publicación en GitHub Pages
+## Publicación en Cloudflare Pages
 
-La aplicación no necesita compilación: se puede publicar la raíz del repositorio desde **Settings → Pages → Deploy from a branch**. La interfaz es estática; los datos de la cuenta se guardan en Supabase y pueden exportarse como JSON. En GitHub Free, Pages requiere un repositorio público: no subir secretos, archivos `.env` ni respaldos. `cloud-config.js` contiene únicamente la clave pública prevista para el navegador; la protección de los datos depende de la autenticación y las políticas RLS de Supabase.
+El repositorio de GitHub conserva el código fuente. La página de producción se aloja en Cloudflare Pages mediante Direct Upload: https://dulce-gestion-c70.pages.dev/. Los cambios en GitHub no se despliegan en Cloudflare hasta que el propietario lo solicite expresamente.
+
+La aplicación es estática y no necesita compilación. Al preparar la próxima publicación, incluir los archivos de la raíz de la aplicación y la carpeta `vendor/` completa, con `index.html` en la raíz del archivo ZIP. El generador de PDF necesita `pdf-export.js`, `vendor/jspdf.umd.min.js` y `vendor/jspdf.plugin.autotable.min.js`; conservar también sus licencias. No incluir `test/`, respaldos, archivos `.env`, `.git` ni datos del negocio.
+
+Los datos de la cuenta se guardan en Supabase. `cloud-config.js` contiene únicamente la clave pública prevista para el navegador; la protección de los datos depende de la autenticación y las políticas RLS de Supabase.
+
+## Exportar datos
+
+En **Datos y respaldos** se puede descargar un respaldo JSON para restaurar la aplicación o un **informe completo en PDF** para consultar, imprimir o archivar.
+
+El PDF incluye resumen, clientes y contactos, existencias, costos manuales, productos, recetas y gastos, combos, compras y correcciones, ajustes de stock, pedidos y saldos calculados, ventas y resumen mensual, producciones y sus desgloses históricos. Identifica los registros anulados o eliminados que se conservan, los costos actuales frente a los históricos y los borradores pendientes de sincronización. Los saldos se calculan restando las señas: la aplicación no registra cobros posteriores. La ganancia bruta no equivale a ganancia neta.
+
+La generación y descarga se hacen localmente en el navegador. Las bibliotecas están incluidas en `vendor/` con versiones fijas y licencias MIT; no se usan servicios externos de conversión ni una nueva API. La caché de la PWA incluye estos archivos para poder exportar los datos ya cargados sin conexión. El PDF no permite restaurar la aplicación: conservar el JSON para ese fin.
 
 ## Alcance de esta primera versión
 

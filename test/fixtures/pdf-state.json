@@ -1,0 +1,36 @@
+{
+  "ingredients": [
+    {"id":"h","name":"Harina","baseUnit":"g","displayUnit":"kg","stock":1500,"averageCost":0.052,"costHistory":[{"previousCost":0.05,"newCost":0.052,"amount":52,"costUnit":"kg","createdAt":"2026-10-21T12:00:00Z","actorEmail":"usuario de prueba"}]},
+    {"id":"a","name":"Azúcar","baseUnit":"kg","stock":2,"averageCost":60}
+  ],
+  "clients": [
+    {"id":"cli1","name":"María Núñez","phone":"099000001","instagram":"@ejemplo","notes":"Prefiere entregas después de las 18:00. Consultar antes de cambiar sabores."},
+    {"id":"cli2","name":"José Peña","phone":"099000002","notes":"Dirección e indicaciones de ejemplo, sin datos reales."}
+  ],
+  "products": [
+    {"id":"p1","name":"Torta de merengue","category":"Tortas","yieldQuantity":1,"salePrice":790,"recipe":[{"ingredientId":"h","quantity":500,"unit":"g"}],"optionalCosts":{"labor":100,"gas":10}},
+    {"id":"p2","name":"Alfajor de prueba","yieldQuantity":6,"salePrice":80,"recipe":[{"ingredientId":"h","quantity":0.3,"unit":"kg"},{"ingredientId":"a","quantity":0.1,"unit":"kg"}],"optionalCosts":{"packaging":6},"deletedAt":"2026-10-22T12:00:00Z"},
+    {"id":"c1","kind":"combo","name":"Merienda para dos","description":"Dos tortas para compartir.","yieldQuantity":1,"salePrice":1500,"items":[{"productId":"p1","quantity":2}],"optionalCosts":{"packaging":25}}
+  ],
+  "purchases": [
+    {"id":"buy1","ingredientId":"h","quantity":2,"purchaseUnit":"kg","baseQuantity":2000,"totalCost":100,"date":"2026-10-20","history":[{"type":"edit","at":"2026-10-21T12:00:00Z","actorEmail":"usuario de prueba","before":{"ingredientId":"h","quantity":1,"purchaseUnit":"kg","totalCost":50,"date":"2026-10-20"},"after":{"ingredientId":"h","quantity":2,"purchaseUnit":"kg","totalCost":100,"date":"2026-10-20"}}]},
+    {"id":"buy2","ingredientId":"a","quantity":1,"purchaseUnit":"kg","baseQuantity":1,"totalCost":60,"date":"2026-10-19","deletedAt":"2026-10-21T13:00:00Z","history":[{"type":"delete","at":"2026-10-21T13:00:00Z","actorEmail":"usuario de prueba","before":{"ingredientId":"a","quantity":1,"purchaseUnit":"kg","totalCost":60,"date":"2026-10-19"},"after":null}]}
+  ],
+  "stockAdjustments": [
+    {"id":"adj1","ingredientId":"h","ingredientName":"Harina","unit":"g","previousStock":1000,"newStock":1500,"delta":500,"addedValue":26,"reason":"home","note":"Aporte de prueba","date":"2026-10-21","actorEmail":"usuario de prueba"},
+    {"id":"adj2","ingredientId":"a","unit":"kg","previousStock":1,"newStock":1.1,"delta":0.1,"addedValue":0,"costUnestimated":true,"reason":"production","date":"2026-10-21","voidedAt":"2026-10-22T13:00:00Z"}
+  ],
+  "orders": [
+    {"id":"o1","clientId":"cli1","customerName":"María Núñez","phone":"099000001","productId":"p1","quantity":2,"totalPrice":1580,"deposit":500,"status":"confirmado","createdAt":"2026-10-20","deliveryDate":"2026-10-28","notes":"Decoración y entrega de prueba"},
+    {"id":"o2","customerName":"José Peña","productId":"c1","quantity":1,"totalPrice":1500,"deposit":300,"status":"entregado","createdAt":"2026-10-21","deliveryDate":"2026-10-22","deliveredAt":"2026-10-22T18:00:00Z","saleId":"s2"},
+    {"id":"o3","customerName":"Cliente de prueba","productId":"p2","quantity":1,"totalPrice":80,"deposit":20,"status":"cancelado","createdAt":"2026-10-19","deliveryDate":"2026-10-23","deletedAt":"2026-10-22T12:00:00Z","deletedBy":"usuario de prueba"}
+  ],
+  "sales": [
+    {"id":"s1","productId":"p1","quantity":2,"unitPrice":790,"unitCostSnapshot":120,"date":"2026-09-23","customerName":"María Núñez"},
+    {"id":"s2","productId":"c1","quantity":1,"unitPrice":1500,"unitCostSnapshot":265,"date":"2026-10-22","sourceOrderId":"o2"}
+  ],
+  "productions": [
+    {"id":"pr1","productId":"p1","productNameSnapshot":"Torta de merengue","batches":1,"producedQuantity":1,"unitCostSnapshot":120,"totalCostSnapshot":120,"date":"2026-10-20","requirementsSnapshot":[{"ingredientId":"h","name":"Harina","required":500,"unit":"g","cost":25}],"optionalCostsSnapshot":[{"label":"Mano de obra","totalCost":95}]},
+    {"id":"pr2","productId":"p2","productNameSnapshot":"Alfajor de prueba","batches":1,"producedQuantity":6,"unitCostSnapshot":5,"totalCostSnapshot":30,"date":"2026-10-19","requirementsSnapshot":[{"ingredientId":"h","name":"Harina","required":300,"unit":"g","cost":15}],"costUnestimated":true,"voidedAt":"2026-10-20T12:00:00Z","deletedAt":"2026-10-21T12:00:00Z","deletedBy":"usuario de prueba"}
+  ]
+}

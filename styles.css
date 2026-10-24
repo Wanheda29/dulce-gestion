@@ -156,6 +156,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .backup-card h2 { margin: 2px 0 8px; font-family: Georgia, serif; }
 .backup-card p { margin: 0; color: var(--muted); line-height: 1.55; }
 .backup-card button { grid-column: 1 / -1; }
+.backup-card #pdf-status { grid-column: 1 / -1; }
 .backup-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; background: var(--berry-soft); color: var(--berry); font-size: 1.45rem; font-weight: 900; }
 .data-summary > div { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0; }
 .data-summary span { padding: 13px; border-radius: 12px; background: #faf6f4; text-align: center; }

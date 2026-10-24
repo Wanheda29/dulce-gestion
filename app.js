@@ -1,5 +1,6 @@
 import { correctPurchaseInventory, countedStock, customerKey, deleteProductRecord, deleteProductionRecord, ingredientQuantity, ingredientUnit, ingredientUnitCost, ingredientWithManualCost, monthlySummary, pagedOrders, productionCostBreakdown, productDefinition, productionPlan, productionWithHomeSupply, profitOnCostPercent, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
 import { renderCombos as renderComboPage } from "./combos.js";
+import { exportBusinessPdf } from "./pdf-export.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
@@ -770,10 +771,31 @@ function renderData() {
   app.innerHTML = pageHeading("Datos y respaldos", "Descargá una copia o restaurá información desde un archivo válido.") + `
     <div class="backup-grid">
       <article class="card backup-card"><div class="backup-icon">↓</div><div><h2>Crear respaldo</h2><p>Descarga los insumos, el historial de ajustes, las recetas y combos, compras, clientes, pedidos, producciones y ventas en un único archivo JSON.</p></div><button class="primary" id="download-backup">Descargar respaldo</button></article>
+      <article class="card backup-card"><div class="backup-icon">PDF</div><div><h2>Informe completo en PDF</h2><p>Exportá clientes, insumos, recetas, combos, compras, ajustes, pedidos, producciones y ventas en tablas, con totales e historial. Para restaurar datos necesitás el respaldo JSON.</p></div><button class="primary" id="download-pdf">Descargar PDF</button><p id="pdf-status" class="muted" role="status" aria-live="polite"></p></article>
       <article class="card backup-card"><div class="backup-icon">↑</div><div><h2>Restaurar respaldo</h2><p>El archivo se revisará antes de reemplazar los datos actuales. También se aceptan respaldos de la versión anterior.</p></div><button class="secondary" id="choose-backup" ${restoringDisabled ? "disabled" : ""}>Elegir archivo</button><input id="backup-file" type="file" accept="application/json,.json" hidden></article>
     </div>
     <article class="card data-summary"><h3>${cloudAccount ? "Datos del negocio" : "Contenido actual de este dispositivo"}</h3><div>${Object.entries({ Insumos: summary.ingredients, Ajustes: summary.stockAdjustments, Compras: summary.purchases, "Productos y combos": summary.products, Producciones: summary.productions, Clientes: summary.clients, Pedidos: summary.orders, Ventas: summary.sales }).map(([label, value]) => `<span><strong>${value}</strong><small>${label}</small></span>`).join("")}</div><p class="warning"><strong>Importante:</strong> ${cloudAccount ? cloudWriteBlocked ? "Hay cambios pendientes de sincronización. Descargá un respaldo del borrador." : "Descargá respaldos periódicos además de la sincronización." : "La información vive solamente en este navegador. Descargá respaldos con frecuencia."}</p></article>`;
   app.querySelector("#download-backup").addEventListener("click", () => { exportState(state); toast("Respaldo descargado"); });
+  app.querySelector("#download-pdf").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const status = app.querySelector("#pdf-status");
+    button.disabled = true;
+    button.textContent = "Generando PDF…";
+    status.textContent = "Preparando el informe. Los informes grandes pueden demorar unos segundos.";
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const result = await exportBusinessPdf(state, {
+        businessName: cloudAccount?.businessName || "Dulce Gestión",
+        exportedBy: cloudSession?.user?.email,
+        pendingChanges: Boolean(cloudAccount?.businessId && readCloudDraft(cloudAccount.businessId)),
+      });
+      status.textContent = "PDF generado: " + result.pages + " páginas. Revisá tus descargas.";
+      toast("Informe PDF descargado");
+    } catch (error) {
+      status.textContent = "No se pudo generar el PDF. " + error.message;
+      toast("No se pudo generar el informe PDF", 6000);
+    } finally { button.disabled = false; button.textContent = "Descargar PDF"; }
+  });
   const fileInput = app.querySelector("#backup-file");
   app.querySelector("#choose-backup").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", async () => {

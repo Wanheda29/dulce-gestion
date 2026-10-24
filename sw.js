@@ -1,5 +1,5 @@
-const CACHE = "dulce-gestion-v17";
-const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./combos.js", "./storage.js", "./cloud.js", "./cloud-config.js", "./manifest.webmanifest"];
+const CACHE = "dulce-gestion-v18";
+const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./combos.js", "./storage.js", "./pdf-export.js", "./vendor/jspdf.umd.min.js", "./vendor/jspdf.plugin.autotable.min.js", "./cloud.js", "./cloud-config.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
