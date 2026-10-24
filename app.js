@@ -1,6 +1,6 @@
 import { correctPurchaseInventory, countedStock, customerKey, deleteProductRecord, deleteProductionRecord, ingredientQuantity, ingredientUnit, ingredientUnitCost, ingredientWithManualCost, monthlySummary, pagedOrders, productionCostBreakdown, productDefinition, productionPlan, productionWithHomeSupply, profitOnCostPercent, recipeCost, reverseProductionStock, saleCustomerName as resolveSaleCustomerName, saleFromOrder, toBaseQuantity, unitGroups, updateWeightedAverage } from "./domain.js";
 import { renderCombos as renderComboPage } from "./combos.js";
-import { exportBusinessPdf } from "./pdf-export.js";
+import { exportBusinessPdf, exportIndividualPdf } from "./pdf-export.js";
 import { backupSummary, emptyState, exportState, loadState, normalizeState, parseBackup, saveState, uid } from "./storage.js";
 import { getCloudAccount, getSession, isCloudConfigured, pullCloudState, pushCloudState, signIn, signOut } from "./cloud.js";
 
@@ -47,6 +47,7 @@ const today = () => {
   return `${year}-${month}-${day}`;
 };
 const currentMonth = () => today().slice(0, 7);
+const pdfReportFilters = { type: "sales", mode: "month", month: currentMonth(), from: `${currentMonth()}-01`, to: today() };
 const ingredientById = (id) => state.ingredients.find((item) => item.id === id);
 const productById = (id) => state.products.find((item) => item.id === id);
 const activeProducts = () => state.products.filter((item) => !item.deletedAt && item.kind !== "combo");
@@ -609,7 +610,7 @@ function openClientDialog(existing = null) {
     event.preventDefault();
     const values = { name: form.elements.name.value.trim(), phone: form.elements.phone.value.trim(), instagram: form.elements.instagram.value.trim(), notes: form.elements.notes.value.trim() };
     if (existing) Object.assign(existing, values);
-    else state.clients.push({ id: uid("cli"), ...values });
+    else state.clients.push({ id: uid("cli"), createdAt: new Date().toISOString(), ...values });
     modal.close();
     persist(existing ? "Cliente actualizado" : "Cliente creado");
   });
@@ -756,13 +757,68 @@ function renderReports() {
     return { product, units, revenue, profit };
   }).filter((row) => row.units > 0).sort((a, b) => b.revenue - a.revenue);
   const sortedSales = [...sales].sort((a, b) => b.date.localeCompare(a.date));
-  app.innerHTML = pageHeading("Informe mensual", "Ingresos y costos históricos de las ventas registradas.") + `
+  app.innerHTML = pageHeading("Informes", "Descargá reportes individuales o consultá el resumen mensual de ventas.") + `
+    <article class="card report-download">
+      <h3>Descargar reporte en PDF</h3>
+      <p>Elegí ventas, compras de insumos o clientes registrados. Cada descarga contiene únicamente el reporte seleccionado.</p>
+      <form id="individual-report-form">
+        <div class="filter-bar">
+          <div class="field"><label for="pdf-report-type">Reporte</label><select id="pdf-report-type" name="type"><option value="sales">Ventas</option><option value="purchases">Compras de insumos</option><option value="clients">Clientes registrados</option></select></div>
+          <div class="field"><label for="pdf-report-mode">Período</label><select id="pdf-report-mode" name="mode"><option value="month">Mes específico</option><option value="range">Rango de fechas</option><option value="all">Todos los períodos</option></select></div>
+          <div class="field" data-pdf-month><label for="pdf-report-month">Mes del reporte PDF</label><input id="pdf-report-month" name="month" type="month" required value="${h(pdfReportFilters.month)}"></div>
+          <div class="field" data-pdf-range><label for="pdf-report-from">Desde (inclusive)</label><input id="pdf-report-from" name="from" type="date" required value="${h(pdfReportFilters.from)}"></div>
+          <div class="field" data-pdf-range><label for="pdf-report-to">Hasta (inclusive)</label><input id="pdf-report-to" name="to" type="date" required value="${h(pdfReportFilters.to)}"></div>
+        </div>
+        <p id="individual-report-note" class="muted"></p>
+        <button class="primary" type="submit">Descargar reporte PDF</button>
+        <p id="individual-report-status" class="muted" role="status" aria-live="polite"></p>
+      </form>
+    </article>
+    <h2>Resumen mensual de ventas</h2><p>Los filtros de esta consulta en pantalla son independientes del reporte PDF.</p>
     <div class="filter-bar"><div class="field"><label for="report-month">Mes</label><input id="report-month" type="month" value="${h(month)}"></div><div class="field"><label for="report-client-filter">Cliente</label><select id="report-client-filter"><option value="">Todos los clientes</option>${customerOptions([...state.clients.map((client) => client.name), ...state.sales.map(saleCustomerName)], reportClientFilter)}<option value="__no_client__" ${reportClientFilter === "__no_client__" ? "selected" : ""}>Sin cliente</option></select></div></div>
     <div class="stats"><article class="stat"><small>Encargos</small><strong>${summary.orders}</strong></article><article class="stat"><small>Ingresos</small><strong>${money.format(summary.revenue)}</strong></article><article class="stat"><small>Costos</small><strong>${money.format(summary.cost)}</strong></article><article class="stat"><small>Ganancia bruta</small><strong class="positive">${money.format(summary.profit)}</strong></article></div>
     <article class="card"><h3>Resultados por producto</h3>${productRows.length ? `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Unidades</th><th>Ingresos</th><th>Ganancia</th></tr></thead><tbody>${productRows.map((row) => `<tr><td><strong>${h(row.product.name)}</strong></td><td>${decimal.format(row.units)}</td><td>${money.format(row.revenue)}</td><td>${money.format(row.profit)}</td></tr>`).join("")}</tbody></table></div>` : empty("No hay ventas con estos filtros.")}</article>
     <article class="card stock-history"><h3>Ventas del período</h3>${sortedSales.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Producto</th><th>Ingresos</th><th>Ganancia</th></tr></thead><tbody>${sortedSales.map((sale) => `<tr><td>${h(sale.date)}</td><td>${h(saleCustomerName(sale) || "Sin cliente")}</td><td>${h(productById(sale.productId)?.name || "Producto eliminado")}</td><td>${money.format(sale.quantity * sale.unitPrice)}</td><td>${money.format(sale.quantity * (sale.unitPrice - sale.unitCostSnapshot))}</td></tr>`).join("")}</tbody></table></div>` : empty("No hay ventas con estos filtros.")}</article>`;
   app.querySelector("#report-month").addEventListener("change", (event) => { app.dataset.reportMonth = event.target.value; renderReports(); });
   app.querySelector("#report-client-filter").addEventListener("change", (event) => { reportClientFilter = event.target.value; renderReports(); });
+  const form = app.querySelector("#individual-report-form");
+  form.elements.type.value = pdfReportFilters.type;
+  form.elements.mode.value = pdfReportFilters.mode;
+  const updatePdfFilters = () => {
+    for (const key of Object.keys(pdfReportFilters)) pdfReportFilters[key] = form.elements[key].value;
+    for (const container of form.querySelectorAll("[data-pdf-month], [data-pdf-range]")) {
+      const visible = container.hasAttribute("data-pdf-month") ? pdfReportFilters.mode === "month" : pdfReportFilters.mode === "range";
+      container.hidden = !visible;
+      container.querySelector("input").disabled = !visible;
+    }
+    form.elements.to.min = form.elements.from.value;
+    form.querySelector("#individual-report-note").textContent = pdfReportFilters.type === "clients"
+      ? "El período se aplica a la fecha de registro del cliente (Uruguay). Los clientes anteriores sin fecha registrada solo se incluyen al elegir Todos los períodos."
+      : "Se incluyen todos los clientes. Los totales excluyen registros eliminados y anulados. Las fechas de inicio y fin están incluidas.";
+    form.querySelector("#individual-report-status").textContent = "";
+  };
+  form.addEventListener("change", (event) => {
+    if (event.target === form.elements.type && form.elements.type.value === "clients") form.elements.mode.value = "all";
+    updatePdfFilters();
+  });
+  updatePdfFilters();
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = form.querySelector("button");
+    const status = form.querySelector("#individual-report-status");
+    button.disabled = true;
+    button.textContent = "Generando PDF…";
+    status.textContent = "Preparando el reporte…";
+    const filters = { ...pdfReportFilters };
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const result = await exportIndividualPdf(state, { ...filters, businessName: cloudAccount?.businessName || "Dulce Gestión", exportedBy: cloudSession?.user?.email, pendingChanges: Boolean(cloudAccount?.businessId && readCloudDraft(cloudAccount.businessId)) });
+      status.textContent = `PDF generado: ${result.pages} ${result.pages === 1 ? "página" : "páginas"}. Revisá tus descargas.`;
+      toast("Reporte PDF descargado");
+    } catch (error) {
+      status.textContent = `No se pudo generar el PDF. ${error.message}`;
+    } finally { button.disabled = false; button.textContent = "Descargar reporte PDF"; }
+  });
 }
 
 function renderData() {

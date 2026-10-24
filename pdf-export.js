@@ -140,6 +140,76 @@ export function buildBusinessReport(candidate, options = {}) {
   return { businessName: text(options.businessName || "Dulce Gestión"), exportedAt: exportedAt.toISOString(), exportedBy: text(options.exportedBy), pendingChanges: Boolean(options.pendingChanges), summary, sections };
 }
 
+const validDay = (value) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number(value.slice(0, 4)) < 1) return false;
+  const stamp = new Date(`${value}T12:00:00Z`);
+  return Number.isFinite(stamp.getTime()) && stamp.toISOString().slice(0, 10) === value;
+};
+
+/** Inclusive business dates; timestamps for client registration use Uruguay time. */
+export function reportPeriod({ mode = "month", month, from, to } = {}) {
+  if (mode === "all") return { label: "Todos los períodos", slug: "todos", includes: () => true };
+  if (mode === "month") {
+    if (!/^\d{4}-\d{2}$/.test(month || "") || !validDay(`${month}-01`)) throw new Error("Seleccioná un mes válido.");
+    return { label: `Mes: ${month.slice(5)}/${month.slice(0, 4)}`, slug: month, includes: (day) => Boolean(day && day.startsWith(month)) };
+  }
+  if (mode !== "range" || !validDay(from) || !validDay(to)) throw new Error("Indicá las fechas de inicio y fin válidas.");
+  if (from > to) throw new Error("La fecha de inicio no puede ser posterior a la fecha de fin.");
+  return { label: `Del ${date(from)} al ${date(to)} (ambos inclusive)`, slug: `${from}_a_${to}`, includes: (day) => Boolean(day && day >= from && day <= to) };
+}
+
+export function clientRegistrationDate(client) {
+  const value = String(client.createdAt || "");
+  if (validDay(value)) return value;
+  if (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !validDay(value.slice(0, 10))) return null;
+  const stamp = new Date(value);
+  if (!Number.isFinite(stamp.getTime())) return null;
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Montevideo", year: "numeric", month: "2-digit", day: "2-digit" }).format(stamp);
+}
+
+export function buildIndividualReport(candidate, options = {}) {
+  const state = normalizeState(candidate);
+  const titles = { sales: "Reporte de ventas", purchases: "Reporte de compras", clients: "Reporte de clientes registrados" };
+  if (!titles[options.type]) throw new Error("Seleccioná un tipo de reporte válido.");
+  const period = reportPeriod(options);
+  const exportedAt = new Date(options.exportedAt || Date.now());
+  if (!Number.isFinite(exportedAt.getTime())) throw new Error("La fecha de exportación no es válida.");
+  const sections = [];
+  const add = (title, columns, rows, note = "") => sections.push({ title, columns, rows, note });
+  let summary;
+  let scopeNote = "Solo incluye registros vigentes. Se excluyen registros eliminados y anulados.";
+  const active = (item) => !item.deletedAt && !item.voidedAt;
+  if (options.type === "clients") {
+    const clients = state.clients.filter(active);
+    const unknownDates = clients.filter((item) => !clientRegistrationDate(item)).length;
+    const selected = clients.filter((item) => period.includes(clientRegistrationDate(item))).sort((a, b) => text(a.name).localeCompare(text(b.name), "es"));
+    summary = { count: selected.length, unknownDates };
+    scopeNote += " Las fechas de registro se expresan en horario de Uruguay.";
+    add("Resumen de clientes", ["Concepto", "Cantidad"], [["Clientes incluidos", number(selected.length)], ["Clientes sin fecha registrada en el padrón completo", number(unknownDates)]], unknownDates ? `Hay ${number(unknownDates)} clientes sin fecha de registro. ${options.mode === "all" ? "Se incluyen identificados como 'Sin fecha registrada'." : "Se excluyen del filtro por fechas porque no se puede determinar cuándo se registraron."} No se infieren fechas a partir de compras, pedidos ni ventas.` : "El filtro se aplica a la fecha de registro del cliente, no a sus ventas.");
+    add("Clientes registrados", ["Cliente", "Fecha de registro", "Teléfono", "Instagram", "Notas"], selected.map((item) => [text(item.name), clientRegistrationDate(item) ? date(clientRegistrationDate(item)) : "Sin fecha registrada", text(item.phone), text(item.instagram), text(item.notes)]));
+  } else {
+    const source = options.type === "sales" ? state.sales : state.purchases;
+    const activeRows = source.filter(active);
+    const unknownDates = activeRows.filter((item) => !validDay(item.date)).length;
+    const selected = newestFirst(activeRows.filter((item) => period.includes(validDay(item.date) ? item.date : null)));
+    const unknownNote = unknownDates ? ` Hay ${number(unknownDates)} registros vigentes sin fecha válida: ${options.mode === "all" ? "se incluyen en este reporte" : "quedan fuera del filtro por fechas"}.` : "";
+    if (options.type === "sales") {
+      const revenue = selected.reduce((sum, item) => sum + numeric(item.quantity) * numeric(item.unitPrice), 0);
+      const cost = selected.reduce((sum, item) => sum + numeric(item.quantity) * numeric(item.unitCostSnapshot), 0);
+      const units = selected.reduce((sum, item) => sum + numeric(item.quantity), 0);
+      summary = { count: selected.length, units, revenue, cost, profit: revenue - cost };
+      add("Resumen de ventas", ["Concepto", "Valor"], [["Ventas registradas", number(selected.length)], ["Unidades vendidas", number(units)], ["Ingresos", money(revenue)], ["Costo histórico", money(cost)], ["Ganancia bruta", money(revenue - cost)]], "La ganancia bruta resta a los ingresos los costos guardados en cada venta. No representa la ganancia neta. Los pedidos no se suman como ventas adicionales." + unknownNote);
+      add("Detalle de ventas", ["Fecha", "Cliente", "Producto / combo", "Unidades", "Precio unitario", "Ingresos", "Costo histórico", "Ganancia bruta"], selected.map((item) => [validDay(item.date) ? date(item.date) : "Sin fecha válida", text(saleCustomerName(item, state.orders) || state.clients.find((client) => client.id === item.clientId)?.name || "Sin cliente"), text(item.productNameSnapshot || state.products.find((product) => product.id === item.productId)?.name || "Producto no disponible"), number(item.quantity), money(item.unitPrice), money(numeric(item.quantity) * numeric(item.unitPrice)), money(numeric(item.quantity) * numeric(item.unitCostSnapshot)), money(numeric(item.quantity) * (numeric(item.unitPrice) - numeric(item.unitCostSnapshot)))]), "Costos históricos: no se recalculan con los precios actuales de los insumos.");
+    } else {
+      const total = selected.reduce((sum, item) => sum + numeric(item.totalCost), 0);
+      summary = { count: selected.length, total };
+      add("Resumen de compras", ["Concepto", "Valor"], [["Compras registradas", number(selected.length)], ["Importe total", money(total)]], "Importes registrados al comprar. No se suman cantidades de distintas unidades." + unknownNote);
+      add("Detalle de compras de insumos", ["Fecha", "Insumo", "Cantidad", "Unidad", "Costo total", "Costo por unidad de compra"], selected.map((item) => [validDay(item.date) ? date(item.date) : "Sin fecha válida", text(item.ingredientName || state.ingredients.find((ingredient) => ingredient.id === item.ingredientId)?.name || "Insumo no disponible"), number(item.quantity), text(item.purchaseUnit), money(item.totalCost), numeric(item.quantity) > 0 ? `${money(numeric(item.totalCost) / numeric(item.quantity), true)} / ${text(item.purchaseUnit)}` : "No disponible"]));
+    }
+  }
+  return { title: titles[options.type], periodLabel: period.label, filename: `dulce-gestion-${options.type === "sales" ? "ventas" : options.type === "purchases" ? "compras" : "clientes"}-${period.slug}.pdf`, scopeNote, businessName: text(options.businessName || "Dulce Gestión"), exportedAt: exportedAt.toISOString(), exportedBy: text(options.exportedBy), pendingChanges: Boolean(options.pendingChanges), summary, sections };
+}
+
 export function createBusinessPdf(report, { jsPDF, autoTable }) {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
   const width = doc.internal.pageSize.getWidth();
@@ -147,7 +217,7 @@ export function createBusinessPdf(report, { jsPDF, autoTable }) {
   const margin = 14;
   const stamp = new Intl.DateTimeFormat("es-UY", { dateStyle: "short", timeStyle: "short", timeZone: "America/Montevideo" }).format(new Date(report.exportedAt));
   const pdfText = (value) => String(value).replace(/\u00a0/g, " ").replace(/[\u2010-\u2015]/g, "-").replace(/→/g, " a ");
-  doc.setProperties({ title: `Informe del negocio - ${report.businessName}`, subject: "Datos comerciales, costos actuales e historial", author: "Dulce Gestión", creator: "Dulce Gestión" });
+  doc.setProperties({ title: `${report.title || "Informe del negocio"} - ${report.businessName}`, subject: report.periodLabel || "Datos comerciales, costos actuales e historial", author: "Dulce Gestión", creator: "Dulce Gestión" });
   doc.setFont("helvetica", "bold");
   doc.setTextColor(68, 35, 50);
   doc.setFontSize(22);
@@ -155,16 +225,17 @@ export function createBusinessPdf(report, { jsPDF, autoTable }) {
   doc.text(heading, margin, 20);
   let y = 20 + heading.length * 8;
   doc.setFontSize(13);
-  doc.text("Informe completo del negocio", margin, y);
+  doc.text(report.title || "Informe completo del negocio", margin, y);
   y += 8;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(70);
   const intro = [
+    report.periodLabel,
     `Exportado: ${stamp} (Uruguay). Moneda: pesos uruguayos (UYU).`,
     report.exportedBy !== "-" ? `Exportado por: ${report.exportedBy}` : "",
     report.pendingChanges ? "ATENCIÓN: incluye cambios locales pendientes de sincronización." : "Datos cargados en la aplicación al momento de exportar.",
-    "Incluye registros eliminados y anulados que la aplicación conserva, identificados con su estado.",
+    report.scopeNote || "Incluye registros eliminados y anulados que la aplicación conserva, identificados con su estado.",
     "Este informe es para consulta. Para restaurar la aplicación, conservá también el respaldo JSON.",
   ].filter(Boolean);
   for (const line of intro) {
@@ -176,7 +247,7 @@ export function createBusinessPdf(report, { jsPDF, autoTable }) {
   for (let index = 0; index < report.sections.length; index++) {
     const section = report.sections[index];
     const title = `${index + 1}. ${section.title}`;
-    const weights = section.title === "Clientes" ? [60, 30, 40, 139] : section.columns.map((column) => /Notas|Descripción|Antes|Después|Motivo/.test(column) ? 3 : /Producto|Cliente|Insumo|Combo|Concepto/.test(column) ? 2.3 : /Unidad|Cantidad|Rendimiento|Tandas|Mes/.test(column) ? 1.1 : 1.7);
+    const weights = section.title === "Clientes" ? [60, 30, 40, 139] : section.title === "Clientes registrados" ? [60, 35, 30, 35, 109] : section.columns.map((column) => /Notas|Descripción|Antes|Después|Motivo/.test(column) ? 3 : /Producto|Cliente|Insumo|Combo|Concepto/.test(column) ? 2.3 : /Unidad|Cantidad|Rendimiento|Tandas|Mes/.test(column) ? 1.1 : 1.7);
     const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
     const columnWidths = weights.map((weight) => (width - margin * 2) * weight / totalWeight);
     doc.setFont("helvetica", "bold");
@@ -225,7 +296,7 @@ export function createBusinessPdf(report, { jsPDF, autoTable }) {
   const pages = doc.getNumberOfPages();
   for (let page = 1; page <= pages; page++) {
     doc.setPage(page); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(110);
-    if (page > 1) doc.text(doc.splitTextToSize(pdfText(`${report.businessName} - Informe del negocio`), width - margin * 2)[0], margin, 12);
+    if (page > 1) doc.text(doc.splitTextToSize(pdfText(`${report.businessName} - ${report.title || "Informe del negocio"}`), width - margin * 2)[0], margin, 12);
     doc.text("Dulce Gestión | Datos del negocio | UYU", margin, height - 8);
     doc.text(`Página ${page} de ${pages}`, width - margin, height - 8, { align: "right" });
   }
@@ -255,5 +326,12 @@ export async function exportBusinessPdf(state, options = {}) {
   const doc = createBusinessPdf(report, library);
   const stamp = new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Montevideo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(report.exportedAt));
   await doc.save(`dulce-gestion-informe-${stamp}.pdf`, { returnPromise: true });
+  return { pages: doc.getNumberOfPages() };
+}
+
+export async function exportIndividualPdf(state, options = {}) {
+  const report = buildIndividualReport(structuredClone(state), options);
+  const doc = createBusinessPdf(report, await pdfLibrary());
+  await doc.save(report.filename, { returnPromise: true });
   return { pages: doc.getNumberOfPages() };
 }

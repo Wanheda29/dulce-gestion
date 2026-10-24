@@ -179,6 +179,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .filter-bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin: 0 0 18px; }
 .filter-bar .field { min-width: min(220px, 100%); }
 .filter-bar select, .filter-bar input { width: 100%; }
+.report-download { margin-bottom: 28px; }
+.report-download form > .muted { max-width: 900px; }
 .pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: 18px; }
 .pagination span { color: var(--muted); font-size: .9rem; }
 .order-card-head { display: flex; justify-content: space-between; gap: 18px; }

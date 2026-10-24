@@ -28,6 +28,10 @@ El PDF incluye resumen, clientes y contactos, existencias, costos manuales, prod
 
 La generación y descarga se hacen localmente en el navegador. Las bibliotecas están incluidas en `vendor/` con versiones fijas y licencias MIT; no se usan servicios externos de conversión ni una nueva API. La caché de la PWA incluye estos archivos para poder exportar los datos ya cargados sin conexión. El PDF no permite restaurar la aplicación: conservar el JSON para ese fin.
 
+En **Informes** también se descargan reportes PDF individuales de **ventas**, **compras de insumos** o **clientes registrados**, con un mes específico, un rango de fechas (inicio y fin incluidos) o todos los períodos. Cada PDF identifica el período y contiene su resumen y detalle. Los reportes individuales excluyen registros anulados y eliminados; las ventas conservan sus costos históricos. Sus filtros son independientes de la consulta mensual en pantalla.
+
+Los clientes nuevos guardan su fecha de registro. Los anteriores sin fecha se incluyen al elegir **Todos los períodos**, identificados como «Sin fecha registrada»; no se inventa una fecha al editarlos. Al filtrar clientes por fechas, el PDF informa cuántos registros sin fecha quedaron fuera. Las fechas de registro se interpretan en horario de Uruguay.
+
 ## Alcance de esta primera versión
 
 - Insumos en gramos, kilogramos, mililitros o unidades. Los insumos ya registrados pueden mostrarse en otra unidad compatible sin alterar sus recetas ni movimientos anteriores.
