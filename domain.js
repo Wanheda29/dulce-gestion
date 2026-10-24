@@ -46,6 +46,11 @@ export function deleteProductRecord(product, orders, deletedAt, deletedBy = null
   return { ...product, deletedAt, deletedBy };
 }
 
+export function deleteIngredientRecord(ingredient, deletedAt, deletedBy = null) {
+  if (!ingredient || ingredient.deletedAt) throw new Error("El insumo ya fue eliminado.");
+  return { ...ingredient, deletedAt, deletedBy };
+}
+
 export function productDefinition(product, products = []) {
   if (!product) throw new Error("El producto no existe.");
   if (product.kind !== "combo") return product;
@@ -165,7 +170,7 @@ export function productionWithHomeSupply(product, ingredients, batches = 1, miss
   const initialPlan = productionPlan(product, workingIngredients, batches, products);
   const adjustments = initialPlan.requirements.filter((line) => !line.enough).map((line) => {
     const ingredient = workingIngredients.find((item) => item.id === line.ingredientId);
-    if (!ingredient) throw new Error("La receta contiene un insumo que ya no existe.");
+    if (!ingredient || ingredient.deletedAt) throw new Error("La receta contiene un insumo eliminado. Reemplazalo o quitalo de la receta antes de producir.");
     const previousAverageCost = Number(ingredient.averageCost || 0);
     const missing = line.required - line.available;
     const suppliedValue = missingValues[line.ingredientId];
@@ -290,7 +295,7 @@ export function productionPlan(product, ingredients, batches = 1, products = [])
   const totals = new Map();
   for (const line of product.recipe ?? []) {
     const ingredient = ingredients.find((item) => item.id === line.ingredientId);
-    if (!ingredient) throw new Error("La receta contiene un insumo que ya no existe.");
+    if (!ingredient || ingredient.deletedAt) throw new Error("La receta contiene un insumo eliminado. Reemplazalo o quitalo de la receta antes de producir.");
     totals.set(line.ingredientId, (totals.get(line.ingredientId) || 0) + recipeLineQuantity(line, ingredient) * batchCount);
   }
   const requirements = [...totals].map(([ingredientId, required]) => {

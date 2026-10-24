@@ -41,13 +41,13 @@ export function buildBusinessReport(candidate, options = {}) {
   const validOrders = state.orders.filter((item) => !item.deletedAt && item.status !== "cancelado");
   const revenue = sales.reduce((sum, item) => sum + numeric(item.quantity) * numeric(item.unitPrice), 0);
   const salesCost = sales.reduce((sum, item) => sum + numeric(item.quantity) * numeric(item.unitCostSnapshot), 0);
-  const stockValue = state.ingredients.reduce((sum, item) => sum + numeric(item.stock) * numeric(item.averageCost), 0);
+  const stockValue = state.ingredients.filter((item) => !item.deletedAt).reduce((sum, item) => sum + numeric(item.stock) * numeric(item.averageCost), 0);
   const orderBalance = validOrders.reduce((sum, item) => sum + Math.max(0, numeric(item.totalPrice) - numeric(item.deposit)), 0);
   const summary = { revenue, salesCost, grossProfit: revenue - salesCost, stockValue, orderBalance, purchaseTotal: purchases.reduce((sum, item) => sum + numeric(item.totalCost), 0) };
   const sections = [];
   sections.push(section("Resumen del negocio", ["Concepto", "Valor"], [
     ["Clientes registrados", number(state.clients.length)],
-    ["Insumos registrados", number(state.ingredients.length)],
+    ["Insumos activos", number(state.ingredients.filter((item) => !item.deletedAt).length)],
     ["Productos / recetas activos", number(currentProducts.filter((item) => !item.deletedAt).length)],
     ["Combos activos", number(combos.filter((item) => !item.deletedAt).length)],
     ["Valor actual de las existencias", money(stockValue)],
@@ -60,7 +60,7 @@ export function buildBusinessReport(candidate, options = {}) {
   ], "Importes en pesos uruguayos (UYU). Las compras eliminadas no se suman. Los pedidos y sus señas no se suman a las ventas para evitar duplicar ingresos. La ganancia bruta no es ganancia neta: solo descuenta los costos registrados en cada venta. Todos los períodos están incluidos."));
 
   sections.push(section("Clientes", ["Cliente", "Teléfono", "Instagram", "Notas"], state.clients.map((item) => [text(item.name), text(item.phone), text(item.instagram), text(item.notes)])));
-  sections.push(section("Insumos y existencias actuales", ["Insumo", "Existencia", "Unidad", "Costo por unidad", "Valor en stock"], state.ingredients.map((item) => [text(item.name), number(ingredientQuantity(item, item.stock)), ingredientUnit(item), money(ingredientUnitCost(item), true), money(numeric(item.stock) * numeric(item.averageCost))])));
+  sections.push(section("Insumos y existencias actuales", ["Insumo", "Existencia", "Unidad", "Costo por unidad", "Valor en stock", "Estado"], state.ingredients.map((item) => [text(item.name), number(ingredientQuantity(item, item.stock)), ingredientUnit(item), money(ingredientUnitCost(item), true), item.deletedAt ? "Excluido del inventario activo" : money(numeric(item.stock) * numeric(item.averageCost)), recordStatus(item)]), "Los insumos eliminados se conservan como referencia histórica y no se suman al valor del inventario activo. Sus cantidades y costos corresponden al registro conservado, que puede recibir reversiones de movimientos históricos."));
 
   const costHistory = state.ingredients.flatMap((item) => (item.costHistory || []).map((change) => [date(change.createdAt), text(item.name), `${money(change.previousCost, true)} / ${item.baseUnit}`, `${money(change.newCost, true)} / ${item.baseUnit}`, `${money(change.amount, true)} / ${text(change.costUnit)}`, text(change.actorEmail)]));
   sections.push(section("Historial de costos manuales", ["Fecha", "Insumo", "Costo anterior", "Costo nuevo", "Importe ingresado", "Registrado por"], costHistory, "Los costos anterior y nuevo se expresan en la unidad interna del insumo, indicada en cada celda. Cambiar la unidad de visualización no reescribe este historial."));

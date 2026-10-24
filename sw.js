@@ -1,4 +1,4 @@
-const CACHE = "dulce-gestion-v19";
+const CACHE = "dulce-gestion-v20";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./domain.js", "./combos.js", "./storage.js", "./pdf-export.js", "./vendor/jspdf.umd.min.js", "./vendor/jspdf.plugin.autotable.min.js", "./cloud.js", "./cloud-config.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

@@ -45,7 +45,7 @@ Los clientes nuevos guardan su fecha de registro. Los anteriores sin fecha se in
 - Cada ingrediente de una receta permite elegir una unidad compatible, por ejemplo 500 g de un insumo registrado en kg. La conversión se aplica al costo y al consumo de stock.
 - Ganancia sobre costo: `(precio de venta - costo) / costo × 100`. Un costo de $100 y una venta de $120 representan 20%; si el costo es cero se muestra «Sin costo definido».
 - Eliminación de recetas con confirmación: desaparecen de las opciones para nuevos registros, conservando ventas, producciones e informes históricos. Primero deben completarse o cancelarse sus pedidos pendientes.
-- Edición segura de insumos, productos y recetas. Los insumos sin stock ni movimientos o referencias pueden eliminarse.
+- Eliminación de cualquier insumo con confirmación, aunque tenga stock, costos, compras, ajustes o recetas. Desaparece del inventario activo y de las opciones para nuevas compras y recetas; se conserva con fecha y autor de eliminación para mantener referencias y costos históricos. Su stock queda fuera de la valoración activa. Las recetas existentes conservan el último costo y deben reemplazar o quitar ese insumo antes de volver a producir; los combos que las incluyen también quedan fuera de nuevas producciones. Se mantienen las correcciones de compras y reversiones de producciones históricas.
 - Registro de producciones por tanda con validación y descuento de materias primas.
 - Gastos opcionales: envases, mano de obra, gas, electricidad, reparto y otros.
 - Ventas con una fotografía del costo al momento de registrarlas.
